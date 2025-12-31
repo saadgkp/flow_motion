@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#10b981">
     <title>FlowMotion — Create Animated Videos</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,6 +29,8 @@
                 </svg>
             </div>
             <span class="logo-text">FlowMotion</span>
+            <span class="tier-badge tier-free" id="tier-badge" onclick="showTierSelector()">Free</span>
+            <span class="usage-display" id="usage-display">3/3 videos left today</span>
         </div>
         <div class="header-actions">
             <button id="render-code" class="btn-render">
