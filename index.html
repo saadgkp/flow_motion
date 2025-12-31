@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowMotion — Create Animated Videos</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Ambient Background -->
+    <div class="ambient-bg">
+        <div class="glow glow-1"></div>
+        <div class="glow glow-2"></div>
+    </div>
+
+    <!-- Fixed Header -->
+    <header class="top-bar">
+        <div class="logo">
+            <div class="logo-mark">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                    <path d="M8 5.14v14l11-7-11-7z" fill="currentColor"/>
+                </svg>
+            </div>
+            <span class="logo-text">FlowMotion</span>
+        </div>
+        <div class="header-actions">
+            <button id="render-code" class="btn-render">
+                <span class="btn-shine"></span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                <span>Render Code</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <!-- Timeline Section (Now Primary) -->
+        <section class="timeline-section">
+            <div class="section-header">
+                <div class="section-title">
+                    <h2>Scene Timeline</h2>
+                    <span class="scene-count" id="scene-count">2 scenes</span>
+                </div>
+                <p class="section-hint">Drag to scroll →</p>
+            </div>
+            
+            <div class="timeline-wrapper" id="timeline-wrapper">
+                <div id="scenes-container" class="scenes-track">
+                    <!-- Scenes will be added here -->
+                </div>
+                
+                <button id="add-scene" class="btn-add-scene">
+                    <div class="add-scene-inner">
+                        <div class="add-icon-wrap">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                        </div>
+                        <span>Add Scene</span>
+                    </div>
+                </button>
+            </div>
+        </section>
+    </main>
+
+    <!-- Floating Preview Widget -->
+    <div class="preview-widget" id="preview-widget">
+        <button class="preview-toggle" id="preview-toggle">
+            <div class="preview-toggle-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+            </div>
+            <span class="preview-toggle-label">Preview</span>
+            <span class="preview-badge" id="preview-badge">Ready</span>
+        </button>
+        
+        <div class="preview-panel" id="preview-panel">
+            <div class="preview-header">
+                <span>Preview</span>
+                <button class="preview-close" id="preview-close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="preview-container">
+                <div class="preview-placeholder" id="preview-placeholder">
+                    <div class="preview-icon-wrap">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                    </div>
+                    <p>Your animation preview</p>
+                    <span>Click "Render Code" to generate</span>
+                </div>
+                <video class="preview-video" id="preview-video" style="display: none;" controls></video>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="bottom-bar">
+        <div class="footer-left">
+            <span class="status-dot"></span>
+            <span>Ready to create magic</span>
+        </div>
+        <button id="install-engine" class="btn-install">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Install Render Engine</span>
+        </button>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
