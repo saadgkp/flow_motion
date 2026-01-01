@@ -1,12 +1,20 @@
 // ===== CONFIG =====
 const DEFAULT_DURATION = 3;
-const API_URL = 'https://flowmotionbackend-production.up.railway.app';
+
+// Auto-detect local development
+const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = IS_LOCAL 
+    ? 'http://localhost:8000' 
+    : 'https://flowmotionbackend-production.up.railway.app';
 
 // ===== TIER CONFIGURATION =====
 const TIERS = {
     FREE: {
         name: 'Free',
         videosPerDay: 3,
+        autofillsPerDay: 3,       // Autofill limit
+        maxScenes: 6,
+        maxCharsPerField: 150,
         maxCodeViews: 2,          // Can view code 2 times after render
         canEditCode: false,       // No editing
         canCopyCode: false,       // No copy
@@ -16,6 +24,9 @@ const TIERS = {
     PRO: {
         name: 'Pro',
         videosPerDay: 10,
+        autofillsPerDay: 10,      // Autofill limit
+        maxScenes: 15,
+        maxCharsPerField: 400,
         maxCodeViews: Infinity,   // Unlimited views
         canEditCode: false,       // No editing (video-first only)
         canCopyCode: true,        // Can copy
@@ -25,6 +36,9 @@ const TIERS = {
     PRO_PLUS: {
         name: 'Pro+',
         videosPerDay: 30,
+        autofillsPerDay: 30,      // Autofill limit
+        maxScenes: 50,
+        maxCharsPerField: 1000,
         maxCodeViews: Infinity,   // Unlimited views
         canEditCode: true,        // Can edit (if code-first path)
         canCopyCode: true,        // Can copy
@@ -50,7 +64,7 @@ let isRendering = false;
 
 // Tier & Usage State
 let currentTier = 'FREE';  // FREE, PRO, PRO_PLUS
-let todayUsage = { videos: 0, codeViews: 0, date: new Date().toDateString() };
+let todayUsage = { videos: 0, codeViews: 0, autofills: 0, date: new Date().toDateString() };
 let generatedCode = null;      // Cache for generated code
 let codeWasCustomized = false; // Track if user went code-first path (PRO+ only)
 let sessionCodeViews = 0;      // Track code views for current video session
@@ -78,9 +92,13 @@ function initializeUsage() {
         const parsed = JSON.parse(stored);
         if (parsed.date === new Date().toDateString()) {
             todayUsage = parsed;
+            // Ensure autofills field exists (migration)
+            if (todayUsage.autofills === undefined) {
+                todayUsage.autofills = 0;
+            }
         } else {
             // Reset for new day
-            todayUsage = { videos: 0, codeViews: 0, date: new Date().toDateString() };
+            todayUsage = { videos: 0, codeViews: 0, autofills: 0, date: new Date().toDateString() };
             saveUsage();
         }
     }
@@ -119,6 +137,13 @@ function updateTierUI() {
     const usageDisplay = document.getElementById('usage-display');
     if (usageDisplay) {
         usageDisplay.textContent = `${remaining}/${tier.videosPerDay} videos left today`;
+    }
+    
+    // Update autofill count
+    const autofillCount = document.getElementById('autofill-count');
+    if (autofillCount) {
+        const remainingAutofills = tier.autofillsPerDay - todayUsage.autofills;
+        autofillCount.textContent = remainingAutofills;
     }
     
     // Always show Advanced dropdown button (replaces old renderBtn)
@@ -251,6 +276,16 @@ function getRemainingCodeViews() {
     return tier.maxCodeViews - sessionCodeViews;
 }
 
+function canAutofill() {
+    const tier = TIERS[currentTier];
+    return todayUsage.autofills < tier.autofillsPerDay;
+}
+
+function getRemainingAutofills() {
+    const tier = TIERS[currentTier];
+    return tier.autofillsPerDay - todayUsage.autofills;
+}
+
 // ===== PREVIEW TOGGLE =====
 function togglePreview() {
     previewOpen = !previewOpen;
@@ -293,7 +328,18 @@ timelineWrapper.addEventListener('mousemove', (e) => {
 // ===== UPDATE SCENE COUNT =====
 function updateSceneCount() {
     const count = scenes.length;
-    sceneCountEl.textContent = `${count} scene${count !== 1 ? 's' : ''}`;
+    const tier = TIERS[currentTier];
+    sceneCountEl.textContent = `${count}/${tier.maxScenes} scenes`;
+    
+    // Visual warning when near limit
+    if (count >= tier.maxScenes) {
+        sceneCountEl.classList.add('limit-reached');
+    } else if (count >= tier.maxScenes - 2) {
+        sceneCountEl.classList.add('limit-warning');
+        sceneCountEl.classList.remove('limit-reached');
+    } else {
+        sceneCountEl.classList.remove('limit-warning', 'limit-reached');
+    }
 }
 
 // ===== CREATE SCENE CARD =====
@@ -301,6 +347,9 @@ function createSceneCard(id, index, data = {}) {
     const card = document.createElement('div');
     card.className = 'scene-card';
     card.dataset.id = id;
+    
+    const tier = TIERS[currentTier];
+    const maxChars = tier.maxCharsPerField;
     
     card.innerHTML = `
         <div class="scene-header">
@@ -330,7 +379,8 @@ function createSceneCard(id, index, data = {}) {
                     </div>
                 </div>
                 <div class="prompt-input-wrap">
-                    <textarea class="prompt-input" data-field="show" rows="2">${data.show || ''}</textarea>
+                    <textarea class="prompt-input" data-field="show" rows="2" maxlength="${maxChars}">${data.show || ''}</textarea>
+                    <span class="char-counter">${(data.show || '').length}/${maxChars}</span>
                 </div>
             </div>
             
@@ -347,7 +397,8 @@ function createSceneCard(id, index, data = {}) {
                     </div>
                 </div>
                 <div class="prompt-input-wrap">
-                    <textarea class="prompt-input" data-field="action" rows="2">${data.action || ''}</textarea>
+                    <textarea class="prompt-input" data-field="action" rows="2" maxlength="${maxChars}">${data.action || ''}</textarea>
+                    <span class="char-counter">${(data.action || '').length}/${maxChars}</span>
                 </div>
             </div>
             
@@ -364,7 +415,8 @@ function createSceneCard(id, index, data = {}) {
                     </div>
                 </div>
                 <div class="prompt-input-wrap">
-                    <textarea class="prompt-input" data-field="narration" rows="2">${data.narration || ''}</textarea>
+                    <textarea class="prompt-input" data-field="narration" rows="2" maxlength="${maxChars}">${data.narration || ''}</textarea>
+                    <span class="char-counter">${(data.narration || '').length}/${maxChars}</span>
                 </div>
             </div>
             
@@ -517,6 +569,15 @@ function createTransitionBlock(fromId, toId, data = '') {
 
 // ===== ADD SCENE =====
 function addScene() {
+    const tier = TIERS[currentTier];
+    
+    // Check scene limit
+    if (scenes.length >= tier.maxScenes) {
+        showNotification(`Scene limit reached (${tier.maxScenes}). Upgrade for more scenes!`, 'info');
+        showUpgradeModal();
+        return;
+    }
+    
     sceneCounter++;
     const id = sceneCounter;
     
@@ -620,10 +681,30 @@ scenesContainer.addEventListener('input', (e) => {
     const field = e.target.dataset.field;
     if (!field) return;
     
+    const tier = TIERS[currentTier];
+    
     // Auto-resize textareas
     if (e.target.tagName === 'TEXTAREA') {
         e.target.style.height = 'auto';
         e.target.style.height = e.target.scrollHeight + 'px';
+        
+        // Enforce character limit for text fields (not transition)
+        if (field !== 'transition' && field !== 'duration') {
+            const maxChars = tier.maxCharsPerField;
+            if (e.target.value.length > maxChars) {
+                e.target.value = e.target.value.substring(0, maxChars);
+                showNotification(`Character limit: ${maxChars}. Upgrade for more!`, 'info');
+            }
+            
+            // Update character counter if exists
+            const counter = e.target.parentElement.querySelector('.char-counter');
+            if (counter) {
+                const remaining = maxChars - e.target.value.length;
+                counter.textContent = `${e.target.value.length}/${maxChars}`;
+                counter.classList.toggle('limit-warning', remaining < 20);
+                counter.classList.toggle('limit-reached', remaining <= 0);
+            }
+        }
     }
     
     // Clear cached code when content changes
@@ -1328,9 +1409,10 @@ function showUpgradeModal() {
                         <div class="tier-price">$0</div>
                         <ul class="tier-features">
                             <li>3 videos/day</li>
-                            <li>View code after render (2x)</li>
-                            <li>480p quality</li>
-                            <li>Watermarked</li>
+                            <li>3 AI autofills/day</li>
+                            <li>6 scenes max</li>
+                            <li>150 chars/field</li>
+                            <li>View code 2x after render</li>
                         </ul>
                         ${currentTier === 'FREE' ? '<button class="btn-current" disabled>Current Plan</button>' : ''}
                     </div>
@@ -1340,9 +1422,10 @@ function showUpgradeModal() {
                         <div class="tier-price">$10<span>/mo</span></div>
                         <ul class="tier-features">
                             <li>10 videos/day</li>
+                            <li>10 AI autofills/day</li>
+                            <li>15 scenes max</li>
+                            <li>400 chars/field</li>
                             <li>View & copy code (unlimited)</li>
-                            <li>1080p quality</li>
-                            <li>No watermark</li>
                         </ul>
                         ${currentTier === 'PRO' ? 
                             '<button class="btn-current" disabled>Current Plan</button>' : 
@@ -1354,9 +1437,10 @@ function showUpgradeModal() {
                         <div class="tier-price">$25<span>/mo</span></div>
                         <ul class="tier-features">
                             <li>30 videos/day</li>
+                            <li>30 AI autofills/day</li>
+                            <li>50 scenes max</li>
+                            <li>1000 chars/field</li>
                             <li>Customize code before render</li>
-                            <li>1080p + 4K quality</li>
-                            <li>Priority rendering</li>
                         </ul>
                         ${currentTier === 'PRO_PLUS' ? 
                             '<button class="btn-current" disabled>Current Plan</button>' : 
@@ -1415,15 +1499,15 @@ function showTierSelector() {
                 <div class="tier-selector-buttons">
                     <button class="tier-select-btn ${currentTier === 'FREE' ? 'active' : ''}" onclick="setDemoTier('FREE')">
                         <strong>Free</strong>
-                        <span>Video first → View code 2x (read-only)</span>
+                        <span>6 scenes • 150 chars • 3 videos • 3 autofills</span>
                     </button>
                     <button class="tier-select-btn ${currentTier === 'PRO' ? 'active' : ''}" onclick="setDemoTier('PRO')">
                         <strong>Pro</strong>
-                        <span>Video first → View/copy code (unlimited)</span>
+                        <span>15 scenes • 400 chars • 10 videos • 10 autofills</span>
                     </button>
                     <button class="tier-select-btn ${currentTier === 'PRO_PLUS' ? 'active' : ''}" onclick="setDemoTier('PRO_PLUS')">
                         <strong>Pro+</strong>
-                        <span>Choose: Customize code OR render directly</span>
+                        <span>50 scenes • 1000 chars • 30 videos • 30 autofills</span>
                     </button>
                 </div>
             </div>
@@ -1447,6 +1531,8 @@ function setDemoTier(tier) {
     saveTier();
     resetCodeState();
     updateTierUI();
+    updateSceneCount();  // Update scene count display for new tier limits
+    renderTimeline();    // Re-render to update char limits
     closeTierSelector();
     showNotification(`Switched to ${TIERS[tier].name} tier`, 'success');
 }
@@ -1473,6 +1559,508 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ===== AUTOFILL FEATURE =====
+let isAutofilling = false;
+
+function showAutofillModal() {
+    if (!canAutofill()) {
+        showNotification(`Autofill limit reached (${TIERS[currentTier].autofillsPerDay}/day). Upgrade for more!`, 'info');
+        showUpgradeModal();
+        return;
+    }
+    
+    const existingModal = document.getElementById('autofill-modal');
+    if (existingModal) existingModal.remove();
+    
+    const tier = TIERS[currentTier];
+    const remaining = getRemainingAutofills();
+    
+    const modal = document.createElement('div');
+    modal.id = 'autofill-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content autofill-modal">
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <h3>AI Autofill</h3>
+                    <span class="edit-badge">${remaining} left today</span>
+                </div>
+                <button class="modal-close" onclick="closeAutofillModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p class="autofill-hint">Describe what you want to explain, and AI will generate scene content for you.</p>
+                <div class="autofill-input-group">
+                    <label for="autofill-topic">Topic</label>
+                    <textarea 
+                        id="autofill-topic" 
+                        class="autofill-textarea"
+                        placeholder="e.g., Explain the Pythagorean theorem step by step with visual proofs"
+                        rows="3"
+                        maxlength="500"
+                    ></textarea>
+                    <span class="autofill-char-count"><span id="topic-char-count">0</span>/500</span>
+                </div>
+                <div class="autofill-info">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    <span>Will generate up to ${tier.maxScenes} scenes with ${tier.maxCharsPerField} chars/field</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <label class="autofill-replace-option">
+                    <input type="checkbox" id="autofill-replace" checked>
+                    <span>Replace existing scenes</span>
+                </label>
+                <button class="btn-primary" id="autofill-submit" onclick="executeAutofill()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                    Generate Scenes
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Character counter
+    const topicInput = document.getElementById('autofill-topic');
+    const charCount = document.getElementById('topic-char-count');
+    topicInput.addEventListener('input', () => {
+        charCount.textContent = topicInput.value.length;
+    });
+    
+    // Focus input
+    setTimeout(() => topicInput.focus(), 100);
+    
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeAutofillModal();
+    });
+    
+    // Close on Escape
+    document.addEventListener('keydown', handleAutofillEscape);
+}
+
+function handleAutofillEscape(e) {
+    if (e.key === 'Escape') closeAutofillModal();
+}
+
+function closeAutofillModal() {
+    const modal = document.getElementById('autofill-modal');
+    if (modal) {
+        modal.remove();
+        document.removeEventListener('keydown', handleAutofillEscape);
+    }
+}
+
+async function executeAutofill() {
+    if (isAutofilling) return;
+    
+    const topicInput = document.getElementById('autofill-topic');
+    const topic = topicInput.value.trim();
+    
+    if (!topic || topic.length < 3) {
+        showNotification('Please enter a topic (at least 3 characters)', 'error');
+        return;
+    }
+    
+    const replaceExisting = document.getElementById('autofill-replace').checked;
+    const tier = TIERS[currentTier];
+    
+    isAutofilling = true;
+    const submitBtn = document.getElementById('autofill-submit');
+    const originalHTML = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `
+        <svg class="spinner" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
+        </svg>
+        Generating...
+    `;
+    
+    try {
+        const response = await fetch(`${API_URL}/autofill`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                topic: topic,
+                max_chars_per_field: tier.maxCharsPerField,
+                max_scenes: tier.maxScenes
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success && data.scenes && data.scenes.length > 0) {
+            // Update usage
+            todayUsage.autofills++;
+            saveUsage();
+            
+            // Apply scenes
+            applyAutofillScenes(data.scenes, replaceExisting);
+            
+            closeAutofillModal();
+            showNotification(`Generated ${data.scenes.length} scenes!`, 'success');
+            
+            // Reset code state since content changed
+            resetCodeState();
+        } else {
+            throw new Error(data.message || 'No scenes generated');
+        }
+        
+    } catch (error) {
+        console.error('Autofill error:', error);
+        showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+        isAutofilling = false;
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = originalHTML;
+    }
+}
+
+function applyAutofillScenes(generatedScenes, replaceExisting) {
+    if (replaceExisting) {
+        // Clear existing scenes
+        scenes = [];
+        transitions = [];
+        sceneCounter = 0;
+    }
+    
+    // Add generated scenes
+    generatedScenes.forEach((sceneData, index) => {
+        sceneCounter++;
+        const id = sceneCounter;
+        
+        // Add transition if not first scene
+        if (scenes.length > 0) {
+            const lastScene = scenes[scenes.length - 1];
+            transitions.push({
+                from: lastScene.id,
+                to: id,
+                description: sceneData.transitionToNext || ''
+            });
+        }
+        
+        scenes.push({
+            id,
+            show: sceneData.show || '',
+            action: sceneData.animations || '',
+            narration: sceneData.detailing || '',
+            duration: sceneData.duration || DEFAULT_DURATION,
+            objects: []
+        });
+    });
+    
+    // Re-render
+    renderTimeline();
+    updateSceneCount();
+    
+    // Scroll to first scene
+    setTimeout(() => {
+        timelineWrapper.scrollTo({ left: 0, behavior: 'smooth' });
+    }, 100);
+}
+
+// ===== SAVE/LOAD SCENE CONFIGURATIONS =====
+const SAVED_CONFIGS_KEY = 'flowmotion_saved_configs';
+
+function getSavedConfigs() {
+    const stored = localStorage.getItem(SAVED_CONFIGS_KEY);
+    return stored ? JSON.parse(stored) : [];
+}
+
+function saveConfigs(configs) {
+    localStorage.setItem(SAVED_CONFIGS_KEY, JSON.stringify(configs));
+}
+
+function showSaveModal() {
+    // Check if there's content to save
+    const hasContent = scenes.some(s => s.show || s.action || s.narration);
+    if (!hasContent) {
+        showNotification('Add some content to your scenes before saving', 'error');
+        return;
+    }
+    
+    const existingModal = document.getElementById('save-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'save-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content save-modal">
+            <div class="modal-header">
+                <h3>Save Configuration</h3>
+                <button class="modal-close" onclick="closeSaveModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="save-input-group">
+                    <label for="config-name">Configuration Name</label>
+                    <input 
+                        type="text" 
+                        id="config-name" 
+                        class="save-input"
+                        placeholder="e.g., Pythagorean Theorem Tutorial"
+                        maxlength="50"
+                    >
+                </div>
+                <p class="save-info">${scenes.length} scenes will be saved</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeSaveModal()">Cancel</button>
+                <button class="btn-primary" onclick="executeSave()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                        <polyline points="17 21 17 13 7 13 7 21"/>
+                        <polyline points="7 3 7 8 15 8"/>
+                    </svg>
+                    Save
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    setTimeout(() => document.getElementById('config-name').focus(), 100);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeSaveModal();
+    });
+}
+
+function closeSaveModal() {
+    const modal = document.getElementById('save-modal');
+    if (modal) modal.remove();
+}
+
+function executeSave() {
+    const nameInput = document.getElementById('config-name');
+    const name = nameInput.value.trim();
+    
+    if (!name) {
+        showNotification('Please enter a name for this configuration', 'error');
+        return;
+    }
+    
+    const configs = getSavedConfigs();
+    
+    // Check for duplicate names
+    const existingIndex = configs.findIndex(c => c.name.toLowerCase() === name.toLowerCase());
+    if (existingIndex !== -1) {
+        if (!confirm(`"${name}" already exists. Replace it?`)) {
+            return;
+        }
+        configs.splice(existingIndex, 1);
+    }
+    
+    // Build configuration
+    const config = {
+        name,
+        savedAt: new Date().toISOString(),
+        scenes: scenes.map(s => ({
+            show: s.show,
+            action: s.action,
+            narration: s.narration,
+            duration: s.duration,
+            objects: s.objects || []
+        })),
+        transitions: transitions.map(t => ({
+            description: t.description
+        }))
+    };
+    
+    configs.unshift(config); // Add to beginning
+    
+    // Limit to 20 saved configs
+    if (configs.length > 20) {
+        configs.pop();
+    }
+    
+    saveConfigs(configs);
+    closeSaveModal();
+    showNotification(`Saved "${name}"!`, 'success');
+}
+
+function showLoadModal() {
+    const configs = getSavedConfigs();
+    
+    const existingModal = document.getElementById('load-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'load-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content load-modal">
+            <div class="modal-header">
+                <h3>Load Configuration</h3>
+                <button class="modal-close" onclick="closeLoadModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                ${configs.length === 0 ? `
+                    <div class="empty-configs">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <p>No saved configurations</p>
+                        <span>Save your current scene setup to reuse later</span>
+                    </div>
+                ` : `
+                    <div class="configs-list">
+                        ${configs.map((config, index) => `
+                            <div class="config-item" data-index="${index}">
+                                <div class="config-info">
+                                    <span class="config-name">${escapeHtml(config.name)}</span>
+                                    <span class="config-meta">${config.scenes.length} scenes • ${formatDate(config.savedAt)}</span>
+                                </div>
+                                <div class="config-actions">
+                                    <button class="btn-load-config" onclick="loadConfig(${index})" title="Load">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="8 17 12 21 16 17"/>
+                                            <line x1="12" y1="12" x2="12" y2="21"/>
+                                            <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
+                                        </svg>
+                                    </button>
+                                    <button class="btn-delete-config" onclick="deleteConfig(${index})" title="Delete">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polyline points="3 6 5 6 21 6"/>
+                                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeLoadModal();
+    });
+}
+
+function closeLoadModal() {
+    const modal = document.getElementById('load-modal');
+    if (modal) modal.remove();
+}
+
+function loadConfig(index) {
+    const configs = getSavedConfigs();
+    const config = configs[index];
+    
+    if (!config) {
+        showNotification('Configuration not found', 'error');
+        return;
+    }
+    
+    // Confirm replacement
+    const hasContent = scenes.some(s => s.show || s.action || s.narration);
+    if (hasContent) {
+        if (!confirm('This will replace your current scenes. Continue?')) {
+            return;
+        }
+    }
+    
+    // Clear current scenes
+    scenes = [];
+    transitions = [];
+    sceneCounter = 0;
+    
+    // Load scenes from config
+    config.scenes.forEach((sceneData, i) => {
+        sceneCounter++;
+        const id = sceneCounter;
+        
+        if (scenes.length > 0) {
+            const lastScene = scenes[scenes.length - 1];
+            const transitionData = config.transitions[i - 1] || {};
+            transitions.push({
+                from: lastScene.id,
+                to: id,
+                description: transitionData.description || ''
+            });
+        }
+        
+        scenes.push({
+            id,
+            show: sceneData.show || '',
+            action: sceneData.action || '',
+            narration: sceneData.narration || '',
+            duration: sceneData.duration || DEFAULT_DURATION,
+            objects: sceneData.objects || []
+        });
+    });
+    
+    renderTimeline();
+    updateSceneCount();
+    resetCodeState();
+    closeLoadModal();
+    showNotification(`Loaded "${config.name}"`, 'success');
+}
+
+function deleteConfig(index) {
+    const configs = getSavedConfigs();
+    const config = configs[index];
+    
+    if (!config) return;
+    
+    if (!confirm(`Delete "${config.name}"?`)) {
+        return;
+    }
+    
+    configs.splice(index, 1);
+    saveConfigs(configs);
+    
+    // Refresh modal
+    showLoadModal();
+    showNotification('Configuration deleted', 'success');
+}
+
+function formatDate(isoString) {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return `${diffDays} days ago`;
+    
+    return date.toLocaleDateString();
 }
 
 // ===== INSTALL ENGINE =====
@@ -1608,6 +2196,47 @@ style.textContent = `
         height: 1px;
         background: var(--border);
         margin: 0.25rem 0;
+    }
+    
+    /* Character Counter */
+    .char-counter {
+        position: absolute;
+        bottom: 4px;
+        right: 8px;
+        font-size: 0.65rem;
+        color: var(--text-muted);
+        opacity: 0.6;
+        pointer-events: none;
+        transition: all 0.2s ease;
+    }
+    
+    .prompt-input-wrap {
+        position: relative;
+    }
+    
+    .prompt-input:focus + .char-counter {
+        opacity: 1;
+    }
+    
+    .char-counter.limit-warning {
+        color: #f59e0b;
+        opacity: 1;
+    }
+    
+    .char-counter.limit-reached {
+        color: #ef4444;
+        opacity: 1;
+        font-weight: 600;
+    }
+    
+    /* Scene Count Limits */
+    .scene-count.limit-warning {
+        color: #f59e0b;
+    }
+    
+    .scene-count.limit-reached {
+        color: #ef4444;
+        font-weight: 600;
     }
     
     /* Tier Badge */
@@ -2148,6 +2777,286 @@ style.textContent = `
             bottom: calc(80px + env(safe-area-inset-bottom));
         }
     }
+    
+    /* Autofill Modal */
+    .autofill-modal {
+        max-width: 500px;
+    }
+    
+    .autofill-hint {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-bottom: 1rem;
+    }
+    
+    .autofill-input-group {
+        position: relative;
+        margin-bottom: 1rem;
+    }
+    
+    .autofill-input-group label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 0.5rem;
+    }
+    
+    .autofill-textarea {
+        width: 100%;
+        padding: 12px;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.95rem;
+        color: var(--text);
+        resize: vertical;
+        min-height: 80px;
+        font-family: inherit;
+    }
+    
+    .autofill-textarea:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+    }
+    
+    .autofill-char-count {
+        position: absolute;
+        bottom: 8px;
+        right: 12px;
+        font-size: 0.7rem;
+        color: var(--text-muted);
+    }
+    
+    .autofill-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: rgba(16, 185, 129, 0.05);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        border-radius: 6px;
+        font-size: 0.8rem;
+        color: var(--text-secondary);
+    }
+    
+    .autofill-info svg {
+        flex-shrink: 0;
+        color: var(--primary);
+    }
+    
+    .autofill-replace-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        cursor: pointer;
+        margin-right: auto;
+    }
+    
+    .autofill-replace-option input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--primary);
+    }
+    
+    /* Save/Load Modals */
+    .save-modal,
+    .load-modal {
+        max-width: 450px;
+    }
+    
+    .save-input-group {
+        margin-bottom: 1rem;
+    }
+    
+    .save-input-group label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--text);
+        margin-bottom: 0.5rem;
+    }
+    
+    .save-input {
+        width: 100%;
+        padding: 12px;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 0.95rem;
+        color: var(--text);
+    }
+    
+    .save-input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+    }
+    
+    .save-info {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+    
+    .empty-configs {
+        text-align: center;
+        padding: 2rem;
+        color: var(--text-muted);
+    }
+    
+    .empty-configs svg {
+        margin-bottom: 1rem;
+        opacity: 0.5;
+    }
+    
+    .empty-configs p {
+        font-size: 1rem;
+        color: var(--text-secondary);
+        margin-bottom: 0.25rem;
+    }
+    
+    .empty-configs span {
+        font-size: 0.85rem;
+    }
+    
+    .configs-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+    
+    .config-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 1rem;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        transition: all 0.2s ease;
+    }
+    
+    .config-item:hover {
+        border-color: var(--primary);
+        background: rgba(16, 185, 129, 0.02);
+    }
+    
+    .config-info {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .config-name {
+        font-weight: 500;
+        color: var(--text);
+    }
+    
+    .config-meta {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+    
+    .config-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .btn-load-config,
+    .btn-delete-config {
+        width: 36px;
+        height: 36px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        transition: all 0.2s ease;
+    }
+    
+    .btn-load-config:hover {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: white;
+    }
+    
+    .btn-delete-config:hover {
+        background: #ef4444;
+        border-color: #ef4444;
+        color: white;
+    }
+    
+    /* Toolbar Buttons */
+    .btn-autofill,
+    .btn-save,
+    .btn-load {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.5rem 0.75rem;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 0.8rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .btn-autofill:hover,
+    .btn-save:hover,
+    .btn-load:hover {
+        background: var(--surface);
+        border-color: var(--primary);
+        color: var(--text);
+    }
+    
+    .btn-autofill {
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(16, 185, 129, 0.1));
+        border-color: rgba(139, 92, 246, 0.3);
+        color: #8b5cf6;
+    }
+    
+    .btn-autofill:hover {
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(16, 185, 129, 0.2));
+        border-color: #8b5cf6;
+    }
+    
+    .toolbar-divider {
+        width: 1px;
+        height: 24px;
+        background: var(--border);
+        margin: 0 0.25rem;
+    }
+    
+    /* Dev Badge */
+    .dev-badge {
+        position: fixed;
+        top: 80px;
+        right: 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: white;
+        font-size: 10px;
+        font-weight: 700;
+        border-radius: 4px;
+        z-index: 9999;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
 `;
 document.head.appendChild(style);
 
@@ -2178,3 +3087,19 @@ initializeUsage();
 addScene();
 addScene();
 updateSceneCount();
+
+// Show local dev indicator
+if (IS_LOCAL) {
+    const devBadge = document.createElement('div');
+    devBadge.className = 'dev-badge';
+    devBadge.innerHTML = `
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+        </svg>
+        LOCAL
+    `;
+    document.body.appendChild(devBadge);
+    console.log('%c[FlowMotion] Running in LOCAL mode - API: ' + API_URL, 'color: #10b981; font-weight: bold;');
+}

@@ -58,7 +58,34 @@
                     <h2>Scene Timeline</h2>
                     <span class="scene-count" id="scene-count">2 scenes</span>
                 </div>
-                <p class="section-hint">Drag to scroll →</p>
+                <div class="section-toolbar">
+                    <button class="btn-autofill" id="btn-autofill" onclick="showAutofillModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                        <span>AI Autofill</span>
+                        <span class="autofill-count" id="autofill-count"></span>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="btn-save" onclick="showSaveModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                            <polyline points="17 21 17 13 7 13 7 21"/>
+                            <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        <span>Save</span>
+                    </button>
+                    <button class="btn-load" onclick="showLoadModal()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="8 17 12 21 16 17"/>
+                            <line x1="12" y1="12" x2="12" y2="21"/>
+                            <path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>
+                        </svg>
+                        <span>Load</span>
+                    </button>
+                </div>
             </div>
             
             <div class="timeline-wrapper" id="timeline-wrapper">
