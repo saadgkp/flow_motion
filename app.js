@@ -7,26 +7,29 @@ const TIERS = {
     FREE: {
         name: 'Free',
         videosPerDay: 3,
-        codeEditsBeforeRender: 2,
-        workflow: 'code-first',  // See code first, then render
-        canCopyCode: false,
-        canExportCode: false
+        maxCodeViews: 2,          // Can view code 2 times after render
+        canEditCode: false,       // No editing
+        canCopyCode: false,       // No copy
+        canExportCode: false,     // No export
+        hasCodeFirstOption: false // Only video-first
     },
     PRO: {
         name: 'Pro',
         videosPerDay: 10,
-        codeEditsBeforeRender: 0,  // No editing before render
-        workflow: 'video-first',   // Render first, then see code
-        canCopyCode: true,
-        canExportCode: true
+        maxCodeViews: Infinity,   // Unlimited views
+        canEditCode: false,       // No editing (video-first only)
+        canCopyCode: true,        // Can copy
+        canExportCode: true,      // Can export
+        hasCodeFirstOption: false // Only video-first
     },
     PRO_PLUS: {
         name: 'Pro+',
         videosPerDay: 30,
-        codeEditsBeforeRender: Infinity,  // Unlimited editing
-        workflow: 'code-first',   // See code first, customize, then render
-        canCopyCode: true,
-        canExportCode: true
+        maxCodeViews: Infinity,   // Unlimited views
+        canEditCode: true,        // Can edit (if code-first path)
+        canCopyCode: true,        // Can copy
+        canExportCode: true,      // Can export
+        hasCodeFirstOption: true  // Can choose code-first OR video-first
     }
 };
 
@@ -47,9 +50,10 @@ let isRendering = false;
 
 // Tier & Usage State
 let currentTier = 'FREE';  // FREE, PRO, PRO_PLUS
-let todayUsage = { videos: 0, codeEdits: 0, date: new Date().toDateString() };
-let generatedCode = null;  // Cache for generated code
-let codeEditCount = 0;     // Track edits for current session
+let todayUsage = { videos: 0, codeViews: 0, date: new Date().toDateString() };
+let generatedCode = null;      // Cache for generated code
+let codeWasCustomized = false; // Track if user went code-first path (PRO+ only)
+let sessionCodeViews = 0;      // Track code views for current video session
 
 // ===== DOM ELEMENTS =====
 const scenesContainer = document.getElementById('scenes-container');
@@ -76,7 +80,7 @@ function initializeUsage() {
             todayUsage = parsed;
         } else {
             // Reset for new day
-            todayUsage = { videos: 0, codeEdits: 0, date: new Date().toDateString() };
+            todayUsage = { videos: 0, codeViews: 0, date: new Date().toDateString() };
             saveUsage();
         }
     }
@@ -115,16 +119,20 @@ function updateTierUI() {
         usageDisplay.textContent = `${remaining}/${tier.videosPerDay} videos left today`;
     }
     
-    // Update button labels based on workflow
-    if (tier.workflow === 'code-first') {
+    // Update buttons based on tier
+    if (tier.hasCodeFirstOption) {
+        // PRO+: Show both buttons
+        renderBtn.style.display = 'flex';
         renderBtn.innerHTML = `
             <span class="btn-shine"></span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="16 18 22 12 16 6"></polyline>
                 <polyline points="8 6 2 12 8 18"></polyline>
             </svg>
-            <span>Generate Code</span>
+            <span>Customize Code</span>
         `;
+        renderBtn.disabled = false;
+        
         videoBtn.innerHTML = `
             <span class="btn-shine"></span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -132,24 +140,19 @@ function updateTierUI() {
             </svg>
             <span>Render Video</span>
         `;
-        videoBtn.disabled = !generatedCode;
+        videoBtn.disabled = false;
     } else {
+        // FREE & PRO: Only Render Video button
         renderBtn.style.display = 'none';
+        
         videoBtn.innerHTML = `
             <span class="btn-shine"></span>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polygon points="5 3 19 12 5 21 5 3"/>
             </svg>
-            <span>Create Video</span>
+            <span>Render Video</span>
         `;
         videoBtn.disabled = false;
-    }
-    
-    // Show/hide generate code button based on workflow
-    if (tier.workflow === 'video-first') {
-        renderBtn.style.display = 'none';
-    } else {
-        renderBtn.style.display = 'flex';
     }
 }
 
@@ -158,18 +161,16 @@ function canGenerateVideo() {
     return todayUsage.videos < tier.videosPerDay;
 }
 
-function canEditCode() {
+function canViewCode() {
     const tier = TIERS[currentTier];
-    if (tier.codeEditsBeforeRender === Infinity) return true;
-    if (tier.codeEditsBeforeRender === 0) return false;
-    return codeEditCount < tier.codeEditsBeforeRender;
+    if (tier.maxCodeViews === Infinity) return true;
+    return sessionCodeViews < tier.maxCodeViews;
 }
 
-function getRemainingEdits() {
+function getRemainingCodeViews() {
     const tier = TIERS[currentTier];
-    if (tier.codeEditsBeforeRender === Infinity) return '∞';
-    if (tier.codeEditsBeforeRender === 0) return 0;
-    return tier.codeEditsBeforeRender - codeEditCount;
+    if (tier.maxCodeViews === Infinity) return '∞';
+    return tier.maxCodeViews - sessionCodeViews;
 }
 
 // ===== PREVIEW TOGGLE =====
@@ -463,9 +464,7 @@ function addScene() {
     updateSceneCount();
     
     // Clear cached code when scenes change
-    generatedCode = null;
-    codeEditCount = 0;
-    updateTierUI();
+    resetCodeState();
     
     setTimeout(() => {
         timelineWrapper.scrollTo({
@@ -503,10 +502,16 @@ function deleteScene(id) {
         updateSceneCount();
         
         // Clear cached code when scenes change
-        generatedCode = null;
-        codeEditCount = 0;
-        updateTierUI();
+        resetCodeState();
     }, 300);
+}
+
+// ===== RESET CODE STATE =====
+function resetCodeState() {
+    generatedCode = null;
+    codeWasCustomized = false;
+    sessionCodeViews = 0;
+    updateTierUI();
 }
 
 // ===== RENDER TIMELINE =====
@@ -544,9 +549,7 @@ scenesContainer.addEventListener('input', (e) => {
     }
     
     // Clear cached code when content changes
-    generatedCode = null;
-    codeEditCount = 0;
-    updateTierUI();
+    resetCodeState();
     
     // Transition
     if (field === 'transition') {
@@ -622,9 +625,15 @@ function buildProjectJSON() {
     };
 }
 
-// ===== GENERATE CODE (API CALL) - For Code-First Workflows =====
-async function generateCode() {
+// ===== CUSTOMIZE CODE (PRO+ Only - Code First Path) =====
+async function customizeCode() {
     if (isGenerating) return;
+    
+    const tier = TIERS[currentTier];
+    if (!tier.hasCodeFirstOption) {
+        showNotification('Code customization is available in Pro+ plan', 'info');
+        return;
+    }
     
     // Validate scenes
     const hasContent = scenes.some(s => s.show || s.action);
@@ -661,16 +670,13 @@ async function generateCode() {
         if (data.success && data.code) {
             // Cache the generated code
             generatedCode = data.code;
-            codeEditCount = 0;
+            codeWasCustomized = true;  // Mark as code-first path
             
-            // Show code editor modal
-            showCodeEditorModal(data.code);
+            // Show code editor modal (editable)
+            showCodeEditorModal(data.code, true);
             
             previewBadge.textContent = 'Code Ready';
             previewBadge.classList.add('rendered');
-            
-            // Enable render button
-            updateTierUI();
         } else {
             throw new Error(data.message || 'Generation failed');
         }
@@ -685,34 +691,23 @@ async function generateCode() {
     }
 }
 
-// ===== SHOW CODE EDITOR MODAL (For Code-First Workflows) =====
-function showCodeEditorModal(code) {
+// ===== SHOW CODE EDITOR MODAL (Editable - PRO+ Code-First) =====
+function showCodeEditorModal(code, editable = false) {
     const existingModal = document.getElementById('code-modal');
     if (existingModal) existingModal.remove();
     
     const tier = TIERS[currentTier];
-    const canEdit = canEditCode();
-    const remainingEdits = getRemainingEdits();
     
     const modal = document.createElement('div');
     modal.id = 'code-modal';
     modal.className = 'modal-overlay';
     
-    let editInfo = '';
-    if (tier.workflow === 'code-first') {
-        if (tier.codeEditsBeforeRender === Infinity) {
-            editInfo = '<span class="edit-badge pro-plus">Unlimited edits</span>';
-        } else if (tier.codeEditsBeforeRender > 0) {
-            editInfo = `<span class="edit-badge free">${remainingEdits} edits remaining</span>`;
-        }
-    }
-    
     modal.innerHTML = `
         <div class="modal-content code-editor-modal">
             <div class="modal-header">
                 <div class="modal-title-group">
-                    <h3>Generated Manim Code</h3>
-                    ${editInfo}
+                    <h3>${editable ? 'Customize Your Code' : 'Generated Code'}</h3>
+                    ${editable ? '<span class="edit-badge pro-plus">Editable</span>' : ''}
                 </div>
                 <button class="modal-close" onclick="closeCodeModal()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -725,12 +720,10 @@ function showCodeEditorModal(code) {
                 <div class="code-editor-wrap">
                     <textarea 
                         id="code-editor" 
-                        class="code-editor ${canEdit ? '' : 'readonly'}" 
-                        ${canEdit ? '' : 'readonly'}
+                        class="code-editor ${editable ? '' : 'readonly'}" 
+                        ${editable ? '' : 'readonly'}
                         spellcheck="false"
                     >${escapeHtml(code)}</textarea>
-                    ${!canEdit && tier.codeEditsBeforeRender > 0 ? 
-                        '<div class="edit-limit-overlay"><span>Edit limit reached</span></div>' : ''}
                 </div>
             </div>
             <div class="modal-footer">
@@ -743,15 +736,7 @@ function showCodeEditorModal(code) {
                             </svg>
                             Copy
                         </button>
-                    ` : `
-                        <button class="btn-secondary disabled" disabled title="Upgrade to Pro to copy code">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            Copy (Pro)
-                        </button>
-                    `}
+                    ` : ''}
                     ${tier.canExportCode ? `
                         <button class="btn-secondary" onclick="downloadCode()">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -763,35 +748,27 @@ function showCodeEditorModal(code) {
                         </button>
                     ` : ''}
                 </div>
-                <button class="btn-primary" onclick="proceedToRender()">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polygon points="5 3 19 12 5 21 5 3"/>
-                    </svg>
-                    Render Video
-                </button>
+                ${editable ? `
+                    <button class="btn-primary" onclick="proceedToRender()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Render Video
+                    </button>
+                ` : `
+                    <button class="btn-primary" onclick="closeCodeModal()">Done</button>
+                `}
             </div>
         </div>
     `;
     
     document.body.appendChild(modal);
     
-    // Track edits
-    const editor = document.getElementById('code-editor');
-    if (canEdit) {
+    // Track edits if editable
+    if (editable) {
+        const editor = document.getElementById('code-editor');
         editor.addEventListener('input', () => {
             generatedCode = editor.value;
-            if (tier.codeEditsBeforeRender !== Infinity) {
-                codeEditCount++;
-                const remaining = getRemainingEdits();
-                const badge = modal.querySelector('.edit-badge');
-                if (badge) {
-                    badge.textContent = `${remaining} edits remaining`;
-                    if (remaining <= 0) {
-                        editor.readOnly = true;
-                        editor.classList.add('readonly');
-                    }
-                }
-            }
         });
     }
     
@@ -802,12 +779,24 @@ function showCodeEditorModal(code) {
     document.addEventListener('keydown', handleEscapeKey);
 }
 
-// ===== SHOW CODE VIEW MODAL (For Video-First/Pro - Read Only) =====
+// ===== SHOW CODE VIEW MODAL (Read-Only - After Render) =====
 function showCodeViewModal(code) {
+    const tier = TIERS[currentTier];
+    
+    // Check view limit for FREE tier
+    if (!canViewCode()) {
+        showNotification('Code view limit reached. Upgrade to Pro for unlimited views!', 'info');
+        showUpgradeModal();
+        return;
+    }
+    
+    // Increment view count
+    sessionCodeViews++;
+    
     const existingModal = document.getElementById('code-modal');
     if (existingModal) existingModal.remove();
     
-    const tier = TIERS[currentTier];
+    const remainingViews = getRemainingCodeViews();
     
     const modal = document.createElement('div');
     modal.id = 'code-modal';
@@ -815,7 +804,13 @@ function showCodeViewModal(code) {
     modal.innerHTML = `
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Generated Manim Code</h3>
+                <div class="modal-title-group">
+                    <h3>Generated Manim Code</h3>
+                    ${tier.maxCodeViews !== Infinity ? 
+                        `<span class="edit-badge free">${remainingViews} view${remainingViews !== 1 ? 's' : ''} left</span>` : 
+                        ''
+                    }
+                </div>
                 <button class="modal-close" onclick="closeCodeModal()">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -849,7 +844,7 @@ function showCodeViewModal(code) {
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
                             <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
-                        Upgrade to Copy
+                        Copy (Pro)
                     </button>
                 `}
                 <button class="btn-primary" onclick="closeCodeModal()">Done</button>
@@ -914,30 +909,26 @@ function downloadCode() {
     }
 }
 
-// ===== PROCEED TO RENDER (After Code Review) =====
+// ===== PROCEED TO RENDER (After Code Customization - PRO+) =====
 function proceedToRender() {
     closeCodeModal();
     renderVideoWithCode(generatedCode);
 }
 
-// ===== RENDER VIDEO (Unified) =====
+// ===== RENDER VIDEO (Main Entry Point) =====
 async function renderVideo() {
     const tier = TIERS[currentTier];
     
-    if (tier.workflow === 'video-first') {
-        // PRO: Generate and render in one go
-        await renderVideoFirstWorkflow();
-    } else {
-        // FREE/PRO+: Should have code already, just render
-        if (!generatedCode) {
-            showNotification('Please generate code first.', 'error');
-            return;
-        }
+    // If PRO+ and code was already customized, use that code
+    if (tier.hasCodeFirstOption && codeWasCustomized && generatedCode) {
         await renderVideoWithCode(generatedCode);
+    } else {
+        // Video-first path for all tiers
+        await renderVideoFirstWorkflow();
     }
 }
 
-// ===== VIDEO-FIRST WORKFLOW (PRO) =====
+// ===== VIDEO-FIRST WORKFLOW (All Tiers) =====
 async function renderVideoFirstWorkflow() {
     if (isRendering) return;
     
@@ -959,8 +950,13 @@ async function renderVideoFirstWorkflow() {
         <svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
         </svg>
-        <span>Creating...</span>
+        <span>Rendering...</span>
     `;
+    
+    // Also disable customize button if visible
+    if (renderBtn) {
+        renderBtn.disabled = true;
+    }
     
     previewBadge.textContent = 'Rendering';
     previewBadge.classList.remove('rendered');
@@ -983,9 +979,11 @@ async function renderVideoFirstWorkflow() {
         const data = await response.json();
         
         if (data.success && data.video_url) {
-            // Cache code if returned
+            // Cache code if returned (for viewing after)
             if (data.code) {
                 generatedCode = data.code;
+                codeWasCustomized = false;  // Video-first, so no customization
+                sessionCodeViews = 0;        // Reset view count for new video
             }
             
             // Update usage
@@ -1000,7 +998,7 @@ async function renderVideoFirstWorkflow() {
             // Add "View Code" button to preview
             addViewCodeButton();
             
-            showNotification('Video created successfully!', 'success');
+            showNotification('Video rendered successfully!', 'success');
         } else {
             throw new Error(data.message || 'Render failed');
         }
@@ -1012,11 +1010,14 @@ async function renderVideoFirstWorkflow() {
     } finally {
         isRendering = false;
         videoBtn.disabled = false;
+        if (renderBtn) {
+            renderBtn.disabled = false;
+        }
         updateTierUI();
     }
 }
 
-// ===== RENDER WITH EXISTING CODE (FREE/PRO+) =====
+// ===== RENDER WITH EXISTING CODE (PRO+ Code-First Path) =====
 async function renderVideoWithCode(code) {
     if (isRendering) return;
     
@@ -1035,11 +1036,15 @@ async function renderVideoWithCode(code) {
         <span>Rendering...</span>
     `;
     
+    if (renderBtn) {
+        renderBtn.disabled = true;
+    }
+    
     previewBadge.textContent = 'Rendering';
     previewBadge.classList.remove('rendered');
     
     try {
-        // Send pre-generated code to render endpoint
+        // Send pre-generated/customized code to render endpoint
         const response = await fetch(`${API_URL}/render`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1057,16 +1062,19 @@ async function renderVideoWithCode(code) {
             // Update usage
             todayUsage.videos++;
             saveUsage();
-            updateTierUI();
             
             // Show video
             const videoUrl = `${API_URL}${data.video_url}`;
             showVideoInPreview(videoUrl);
             
-            // Reset for next generation
-            generatedCode = null;
-            codeEditCount = 0;
+            // Add "View Code" button
+            addViewCodeButton();
             
+            // Reset for next project
+            codeWasCustomized = false;
+            sessionCodeViews = 0;
+            
+            updateTierUI();
             showNotification('Video rendered successfully!', 'success');
         } else {
             throw new Error(data.message || 'Render failed');
@@ -1079,6 +1087,9 @@ async function renderVideoWithCode(code) {
     } finally {
         isRendering = false;
         videoBtn.disabled = false;
+        if (renderBtn) {
+            renderBtn.disabled = false;
+        }
         updateTierUI();
     }
 }
@@ -1101,14 +1112,16 @@ function showVideoInPreview(videoUrl) {
     downloadVideoFile(videoUrl);
 }
 
-// ===== ADD VIEW CODE BUTTON (For PRO after render) =====
+// ===== ADD VIEW CODE BUTTON (In Preview Panel) =====
 function addViewCodeButton() {
-    const tier = TIERS[currentTier];
-    if (tier.workflow !== 'video-first' || !generatedCode) return;
+    if (!generatedCode) return;
     
     const previewHeader = document.querySelector('.preview-header');
     const existingBtn = previewHeader.querySelector('.btn-view-code');
     if (existingBtn) existingBtn.remove();
+    
+    const tier = TIERS[currentTier];
+    const remainingViews = getRemainingCodeViews();
     
     const viewCodeBtn = document.createElement('button');
     viewCodeBtn.className = 'btn-view-code';
@@ -1117,7 +1130,7 @@ function addViewCodeButton() {
             <polyline points="16 18 22 12 16 6"></polyline>
             <polyline points="8 6 2 12 8 18"></polyline>
         </svg>
-        View Code
+        View Code ${tier.maxCodeViews !== Infinity ? `(${remainingViews})` : ''}
     `;
     viewCodeBtn.onclick = () => showCodeViewModal(generatedCode);
     
@@ -1160,7 +1173,7 @@ function showUpgradeModal() {
                         <div class="tier-price">$0</div>
                         <ul class="tier-features">
                             <li>3 videos/day</li>
-                            <li>View & edit code (2x)</li>
+                            <li>View code after render (2x)</li>
                             <li>480p quality</li>
                             <li>Watermarked</li>
                         </ul>
@@ -1172,7 +1185,7 @@ function showUpgradeModal() {
                         <div class="tier-price">$10<span>/mo</span></div>
                         <ul class="tier-features">
                             <li>10 videos/day</li>
-                            <li>View & copy code after render</li>
+                            <li>View & copy code (unlimited)</li>
                             <li>1080p quality</li>
                             <li>No watermark</li>
                         </ul>
@@ -1186,7 +1199,7 @@ function showUpgradeModal() {
                         <div class="tier-price">$25<span>/mo</span></div>
                         <ul class="tier-features">
                             <li>30 videos/day</li>
-                            <li>Edit code before render</li>
+                            <li>Customize code before render</li>
                             <li>1080p + 4K quality</li>
                             <li>Priority rendering</li>
                         </ul>
@@ -1217,6 +1230,7 @@ function selectTier(tier) {
     // For demo, just set the tier
     currentTier = tier;
     saveTier();
+    resetCodeState();
     updateTierUI();
     closeUpgradeModal();
     showNotification(`Upgraded to ${TIERS[tier].name}!`, 'success');
@@ -1246,15 +1260,15 @@ function showTierSelector() {
                 <div class="tier-selector-buttons">
                     <button class="tier-select-btn ${currentTier === 'FREE' ? 'active' : ''}" onclick="setDemoTier('FREE')">
                         <strong>Free</strong>
-                        <span>Code-first, 2 edits</span>
+                        <span>Video first → View code 2x (read-only)</span>
                     </button>
                     <button class="tier-select-btn ${currentTier === 'PRO' ? 'active' : ''}" onclick="setDemoTier('PRO')">
                         <strong>Pro</strong>
-                        <span>Video-first, view after</span>
+                        <span>Video first → View/copy code (unlimited)</span>
                     </button>
                     <button class="tier-select-btn ${currentTier === 'PRO_PLUS' ? 'active' : ''}" onclick="setDemoTier('PRO_PLUS')">
                         <strong>Pro+</strong>
-                        <span>Code-first, unlimited edits</span>
+                        <span>Choose: Customize code OR render directly</span>
                     </button>
                 </div>
             </div>
@@ -1276,27 +1290,10 @@ function closeTierSelector() {
 function setDemoTier(tier) {
     currentTier = tier;
     saveTier();
-    generatedCode = null;
-    codeEditCount = 0;
+    resetCodeState();
     updateTierUI();
     closeTierSelector();
     showNotification(`Switched to ${TIERS[tier].name} tier`, 'success');
-}
-
-// ===== EXPORT JSON (for backup) =====
-function exportJSON() {
-    const project = buildProjectJSON();
-    project.created = new Date().toISOString();
-    
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `flowmotion-${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    
-    showNotification('Project exported!', 'success');
 }
 
 // ===== NOTIFICATION =====
@@ -1330,8 +1327,8 @@ function installEngine() {
 
 // ===== EVENT LISTENERS =====
 addSceneBtn.addEventListener('click', addScene);
-renderBtn.addEventListener('click', generateCode);
-videoBtn.addEventListener('click', renderVideo);
+renderBtn.addEventListener('click', customizeCode);  // PRO+ only - Customize Code
+videoBtn.addEventListener('click', renderVideo);      // All tiers - Render Video
 installBtn.addEventListener('click', installEngine);
 
 // ===== ADD STYLES =====
@@ -1413,20 +1410,8 @@ style.textContent = `
     }
     
     .code-editor.readonly {
-        opacity: 0.7;
-        cursor: not-allowed;
-    }
-    
-    .edit-limit-overlay {
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        padding: 12px;
-        background: linear-gradient(transparent, rgba(0,0,0,0.8));
-        text-align: center;
-        color: #fbbf24;
-        font-size: 0.85rem;
+        opacity: 0.8;
+        cursor: default;
     }
     
     .modal-title-group {
