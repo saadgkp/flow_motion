@@ -102,6 +102,8 @@ function saveTier() {
 }
 
 // ===== TIER UI =====
+let advancedDropdownOpen = false;
+
 function updateTierUI() {
     const tier = TIERS[currentTier];
     const remaining = tier.videosPerDay - todayUsage.videos;
@@ -119,42 +121,118 @@ function updateTierUI() {
         usageDisplay.textContent = `${remaining}/${tier.videosPerDay} videos left today`;
     }
     
-    // Update buttons based on tier
-    if (tier.hasCodeFirstOption) {
-        // PRO+: Show both buttons
-        renderBtn.style.display = 'flex';
-        renderBtn.innerHTML = `
-            <span class="btn-shine"></span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="16 18 22 12 16 6"></polyline>
-                <polyline points="8 6 2 12 8 18"></polyline>
-            </svg>
-            <span>Customize Code</span>
-        `;
-        renderBtn.disabled = false;
-        
-        videoBtn.innerHTML = `
-            <span class="btn-shine"></span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            <span>Render Video</span>
-        `;
-        videoBtn.disabled = false;
+    // Always show Advanced dropdown button (replaces old renderBtn)
+    renderBtn.style.display = 'flex';
+    renderBtn.className = 'btn-advanced';
+    renderBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span>Advanced</span>
+        <svg class="dropdown-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+        </svg>
+    `;
+    renderBtn.disabled = false;
+    
+    // Render Video button
+    videoBtn.innerHTML = `
+        <span class="btn-shine"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span>Render Video</span>
+    `;
+    videoBtn.disabled = false;
+    
+    // Update dropdown if it exists
+    updateAdvancedDropdown();
+}
+
+// ===== ADVANCED DROPDOWN =====
+function toggleAdvancedDropdown(e) {
+    e.stopPropagation();
+    advancedDropdownOpen = !advancedDropdownOpen;
+    
+    let dropdown = document.getElementById('advanced-dropdown');
+    
+    if (advancedDropdownOpen) {
+        if (!dropdown) {
+            dropdown = createAdvancedDropdown();
+            renderBtn.parentElement.appendChild(dropdown);
+        }
+        dropdown.classList.add('open');
     } else {
-        // FREE & PRO: Only Render Video button
-        renderBtn.style.display = 'none';
-        
-        videoBtn.innerHTML = `
-            <span class="btn-shine"></span>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-            </svg>
-            <span>Render Video</span>
-        `;
-        videoBtn.disabled = false;
+        if (dropdown) {
+            dropdown.classList.remove('open');
+        }
     }
 }
+
+function createAdvancedDropdown() {
+    const dropdown = document.createElement('div');
+    dropdown.id = 'advanced-dropdown';
+    dropdown.className = 'advanced-dropdown';
+    updateAdvancedDropdownContent(dropdown);
+    return dropdown;
+}
+
+function updateAdvancedDropdown() {
+    const dropdown = document.getElementById('advanced-dropdown');
+    if (dropdown) {
+        updateAdvancedDropdownContent(dropdown);
+    }
+}
+
+function updateAdvancedDropdownContent(dropdown) {
+    const tier = TIERS[currentTier];
+    const isProPlus = tier.hasCodeFirstOption;
+    
+    dropdown.innerHTML = `
+        <button class="dropdown-item ${isProPlus ? '' : 'locked'}" onclick="${isProPlus ? 'viewCopyCode()' : 'showUpgradeModal()'}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+            </svg>
+            <span>View/Copy Code</span>
+            ${isProPlus ? '' : '<svg class="lock-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'}
+        </button>
+        <button class="dropdown-item ${isProPlus ? '' : 'locked'}" onclick="${isProPlus ? 'customizeCode()' : 'showUpgradeModal()'}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            <span>Customize Code</span>
+            ${isProPlus ? '' : '<svg class="lock-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'}
+        </button>
+        ${!isProPlus ? `
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item upgrade-item" onclick="showUpgradeModal()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                </svg>
+                <span>Upgrade to Pro+</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+            </button>
+        ` : ''}
+    `;
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    if (advancedDropdownOpen && !e.target.closest('.btn-advanced') && !e.target.closest('.advanced-dropdown')) {
+        advancedDropdownOpen = false;
+        const dropdown = document.getElementById('advanced-dropdown');
+        if (dropdown) {
+            dropdown.classList.remove('open');
+        }
+    }
+});
 
 function canGenerateVideo() {
     const tier = TIERS[currentTier];
@@ -625,6 +703,78 @@ function buildProjectJSON() {
     };
 }
 
+// ===== VIEW/COPY CODE (PRO+ Only - Code First Path, Read-Only) =====
+async function viewCopyCode() {
+    if (isGenerating) return;
+    
+    const tier = TIERS[currentTier];
+    if (!tier.hasCodeFirstOption) {
+        showNotification('View/Copy code is available in Pro+ plan', 'info');
+        return;
+    }
+    
+    // Close dropdown
+    advancedDropdownOpen = false;
+    const dropdown = document.getElementById('advanced-dropdown');
+    if (dropdown) dropdown.classList.remove('open');
+    
+    // Validate scenes
+    const hasContent = scenes.some(s => s.show || s.action);
+    if (!hasContent) {
+        showNotification('Please add some content to your scenes first.', 'error');
+        return;
+    }
+    
+    isGenerating = true;
+    renderBtn.disabled = true;
+    const originalHTML = renderBtn.innerHTML;
+    renderBtn.innerHTML = `
+        <svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
+        </svg>
+        <span>Generating...</span>
+    `;
+    
+    try {
+        const project = buildProjectJSON();
+        
+        const response = await fetch(`${API_URL}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ project })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.success && data.code) {
+            // Cache the generated code
+            generatedCode = data.code;
+            codeWasCustomized = false;  // View-only, not customized
+            
+            // Show code editor modal (read-only)
+            showCodeEditorModal(data.code, false);
+            
+            previewBadge.textContent = 'Code Ready';
+            previewBadge.classList.add('rendered');
+        } else {
+            throw new Error(data.message || 'Generation failed');
+        }
+        
+    } catch (error) {
+        console.error('Generation error:', error);
+        showNotification(`Error: ${error.message}`, 'error');
+    } finally {
+        isGenerating = false;
+        renderBtn.disabled = false;
+        updateTierUI();
+    }
+}
+
 // ===== CUSTOMIZE CODE (PRO+ Only - Code First Path) =====
 async function customizeCode() {
     if (isGenerating) return;
@@ -634,6 +784,11 @@ async function customizeCode() {
         showNotification('Code customization is available in Pro+ plan', 'info');
         return;
     }
+    
+    // Close dropdown
+    advancedDropdownOpen = false;
+    const dropdown = document.getElementById('advanced-dropdown');
+    if (dropdown) dropdown.classList.remove('open');
     
     // Validate scenes
     const hasContent = scenes.some(s => s.show || s.action);
@@ -1327,7 +1482,7 @@ function installEngine() {
 
 // ===== EVENT LISTENERS =====
 addSceneBtn.addEventListener('click', addScene);
-renderBtn.addEventListener('click', customizeCode);  // PRO+ only - Customize Code
+renderBtn.addEventListener('click', toggleAdvancedDropdown);  // Advanced dropdown
 videoBtn.addEventListener('click', renderVideo);      // All tiers - Render Video
 installBtn.addEventListener('click', installEngine);
 
@@ -1347,6 +1502,112 @@ style.textContent = `
     
     .spinner {
         animation: spin 1s linear infinite;
+    }
+    
+    /* Advanced Dropdown */
+    .header-actions {
+        position: relative;
+    }
+    
+    .btn-advanced {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.6rem 1rem;
+        background: var(--surface-alt);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .btn-advanced:hover {
+        background: var(--surface);
+        border-color: var(--primary);
+        color: var(--text);
+    }
+    
+    .btn-advanced .dropdown-arrow {
+        transition: transform 0.2s ease;
+    }
+    
+    .advanced-dropdown {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        min-width: 220px;
+        background: white;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+        opacity: 0;
+        visibility: hidden;
+        transform: translateY(-10px);
+        transition: all 0.2s ease;
+        z-index: 100;
+        overflow: hidden;
+    }
+    
+    .advanced-dropdown.open {
+        opacity: 1;
+        visibility: visible;
+        transform: translateY(0);
+    }
+    
+    .dropdown-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: none;
+        border: none;
+        color: var(--text);
+        font-size: 0.875rem;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        text-align: left;
+    }
+    
+    .dropdown-item:hover {
+        background: var(--surface-alt);
+    }
+    
+    .dropdown-item.locked {
+        color: var(--text-muted);
+        cursor: not-allowed;
+    }
+    
+    .dropdown-item.locked:hover {
+        background: var(--surface-alt);
+    }
+    
+    .dropdown-item .lock-icon {
+        margin-left: auto;
+        opacity: 0.5;
+    }
+    
+    .dropdown-item.upgrade-item {
+        color: var(--primary);
+        font-weight: 500;
+    }
+    
+    .dropdown-item.upgrade-item:hover {
+        background: rgba(16, 185, 129, 0.1);
+    }
+    
+    .dropdown-item.upgrade-item svg:last-child {
+        margin-left: auto;
+    }
+    
+    .dropdown-divider {
+        height: 1px;
+        background: var(--border);
+        margin: 0.25rem 0;
     }
     
     /* Tier Badge */
