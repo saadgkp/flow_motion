@@ -12,6 +12,291 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    
+    <!-- Auth Styles -->
+    <style>
+        /* ===== SIGN IN BUTTON ===== */
+        .btn-signin {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: linear-gradient(135deg, #10b981, #059669);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+        }
+        
+        .btn-signin:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4);
+        }
+        
+        /* ===== LOGIN PROMPT MODAL ===== */
+        .login-prompt-content {
+            background: linear-gradient(145deg, #1a1a1a, #0d0d0d);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 2.5rem;
+            max-width: 380px;
+            width: 90%;
+            text-align: center;
+            position: relative;
+        }
+        
+        .login-prompt-content .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            color: #6b7280;
+            cursor: pointer;
+            padding: 0.25rem;
+        }
+        
+        .login-prompt-content .modal-close:hover {
+            color: white;
+        }
+        
+        .login-prompt-icon {
+            width: 64px;
+            height: 64px;
+            background: rgba(16, 185, 129, 0.15);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+            color: #10b981;
+        }
+        
+        .login-prompt-content h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 0.5rem;
+        }
+        
+        .login-prompt-content p {
+            color: #9ca3af;
+            margin-bottom: 1.5rem;
+        }
+        
+        .login-prompt-content .btn-google-login {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            background: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .login-prompt-content .btn-google-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+        }
+        
+        .login-prompt-content .btn-google-login:disabled {
+            opacity: 0.7;
+            cursor: wait;
+        }
+        
+        .login-prompt-content .btn-google-login .spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        .login-prompt-note {
+            font-size: 0.75rem !important;
+            color: #6b7280 !important;
+            margin-top: 1rem !important;
+            margin-bottom: 0 !important;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* ===== AUTH CONTAINER ===== */
+        #auth-container {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            margin-right: 1rem;
+        }
+        
+        /* Login Button */
+        .btn-login {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .btn-login:hover {
+            background: #f9fafb;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(-1px);
+        }
+        
+        /* User Profile */
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .user-profile:hover {
+            background: var(--surface);
+            border-color: var(--primary);
+        }
+        
+        .user-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+        
+        .user-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text);
+            max-width: 100px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .dropdown-caret {
+            color: var(--text-muted);
+            transition: transform 0.2s ease;
+        }
+        
+        .user-profile:hover .dropdown-caret {
+            transform: translateY(2px);
+        }
+        
+        /* User Menu */
+        .user-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            min-width: 220px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.2s ease;
+            z-index: 200;
+            overflow: hidden;
+        }
+        
+        .user-menu.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+        
+        .user-menu-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface-alt);
+        }
+        
+        .user-email {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        
+        .user-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            width: 100%;
+            padding: 0.75rem 1rem;
+            background: none;
+            border: none;
+            color: var(--text);
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+        }
+        
+        .user-menu-item:hover {
+            background: var(--surface-alt);
+        }
+        
+        .user-menu-item.logout {
+            color: #ef4444;
+        }
+        
+        .user-menu-item.logout:hover {
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .user-menu-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 0.25rem 0;
+        }
+        
+        /* Position auth container relative for menu */
+        #auth-container {
+            position: relative;
+        }
+        
+        /* Responsive */
+        @media (max-width: 640px) {
+            .btn-login span {
+                display: none;
+            }
+            
+            .btn-login {
+                padding: 0.5rem;
+            }
+            
+            .user-name {
+                display: none;
+            }
+            
+            .user-profile {
+                padding: 0.4rem;
+            }
+        }
+    </style>
 </head>
 <body>
     <!-- Ambient Background -->
@@ -32,6 +317,10 @@
             <span class="tier-badge tier-free" id="tier-badge" onclick="showTierSelector()">Free</span>
             <span class="usage-display" id="usage-display">3/3 videos left today</span>
         </div>
+        
+        <!-- Auth Container (injected by auth.js) -->
+        <div id="auth-container"></div>
+        
         <div class="header-actions">
             <button id="render-code" class="btn-render">
                 <span class="btn-shine"></span>
@@ -161,6 +450,12 @@
         </button>
     </footer>
 
+    <!-- Supabase JS (must be loaded before auth) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- FlowMotion Scripts -->
+    <script src="supabase-config.js"></script>
     <script src="app.js"></script>
+    <script src="auth.js"></script>
 </body>
 </html>

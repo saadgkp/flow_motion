@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowMotion – Signing in...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0a;
+            color: white;
+            font-family: system-ui, -apple-system, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(16, 185, 129, 0.2);
+            border-top-color: #10b981;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .status { color: #9ca3af; font-size: 0.95rem; }
+        .error { color: #ef4444; margin-top: 1rem; }
+        a { color: #10b981; }
+    </style>
+</head>
+<body>
+    <div class="spinner"></div>
+    <p class="status" id="status">Completing sign in...</p>
+    <p class="error" id="error" style="display:none;"></p>
+
+    <!-- Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase-config.js"></script>
+    
+    <script>
+        const LOCAL_ENV = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const APP_URL = LOCAL_ENV ? '/index.html' : 'https://saadgkp.github.io/flow_motion/index.html';
+        
+        function showError(msg) {
+            document.getElementById('status').style.display = 'none';
+            document.querySelector('.spinner').style.display = 'none';
+            const errEl = document.getElementById('error');
+            errEl.innerHTML = msg + '<br><br><a href="' + APP_URL + '">← Back to FlowMotion</a>';
+            errEl.style.display = 'block';
+        }
+        
+        async function handleCallback() {
+            const status = document.getElementById('status');
+            
+            try {
+                // Wait for Supabase to be ready
+                if (!window.FlowMotionSupabase) {
+                    status.textContent = 'Loading...';
+                    await new Promise(r => setTimeout(r, 500));
+                }
+                
+                const supabase = window.FlowMotionSupabase.client;
+                
+                // Check URL for error
+                const params = new URLSearchParams(window.location.search);
+                const hashParams = new URLSearchParams(window.location.hash.substring(1));
+                
+                if (params.get('error') || hashParams.get('error')) {
+                    throw new Error(params.get('error_description') || hashParams.get('error_description') || 'Authentication failed');
+                }
+                
+                status.textContent = 'Verifying session...';
+                
+                // Try to get session - Supabase auto-detects tokens from URL
+                const { data, error } = await supabase.auth.getSession();
+                
+                console.log('[Callback] getSession result:', { data, error });
+                
+                if (error) {
+                    throw error;
+                }
+                
+                if (data.session) {
+                    status.textContent = 'Success! Redirecting...';
+                    console.log('[Callback] Session found, redirecting to:', APP_URL);
+                    
+                    // Small delay to ensure session is stored
+                    setTimeout(() => {
+                        window.location.href = APP_URL;
+                    }, 300);
+                    return;
+                }
+                
+                // No session yet - might need to exchange code
+                const code = params.get('code');
+                if (code) {
+                    status.textContent = 'Exchanging code...';
+                    console.log('[Callback] Found code, exchanging...');
+                    
+                    const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+                    
+                    console.log('[Callback] Exchange result:', { exchangeData, exchangeError });
+                    
+                    if (exchangeError) {
+                        throw exchangeError;
+                    }
+                    
+                    if (exchangeData.session) {
+                        status.textContent = 'Success! Redirecting...';
+                        setTimeout(() => {
+                            window.location.href = APP_URL;
+                        }, 300);
+                        return;
+                    }
+                }
+                
+                // Check hash for access_token (implicit flow)
+                const accessToken = hashParams.get('access_token');
+                if (accessToken) {
+                    status.textContent = 'Processing token...';
+                    console.log('[Callback] Found access_token in hash');
+                    
+                    const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+                    
+                    if (!userError && userData.user) {
+                        status.textContent = 'Success! Redirecting...';
+                        setTimeout(() => {
+                            window.location.href = APP_URL;
+                        }, 300);
+                        return;
+                    }
+                }
+                
+                // Still no session - wait a moment and retry
+                status.textContent = 'Finalizing...';
+                await new Promise(r => setTimeout(r, 1000));
+                
+                const { data: retryData } = await supabase.auth.getSession();
+                if (retryData.session) {
+                    status.textContent = 'Success! Redirecting...';
+                    setTimeout(() => {
+                        window.location.href = APP_URL;
+                    }, 300);
+                    return;
+                }
+                
+                throw new Error('Could not establish session. Please try again.');
+                
+            } catch (err) {
+                console.error('[Callback] Error:', err);
+                showError(err.message || 'Authentication failed');
+            }
+        }
+        
+        // Start after a brief delay to ensure scripts are loaded
+        setTimeout(handleCallback, 200);
+    </script>
+</body>
+</html>

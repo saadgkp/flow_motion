@@ -1,9 +1,36 @@
-// ===== CONFIG =====
+// ===== CONFIG (v2) =====
 const DEFAULT_DURATION = 3;
+const APP_IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+// ===== AUTH HELPER =====
+function getAuthHeaders() {
+    // Always get from localStorage for reliability
+    const token = localStorage.getItem('flowmotion_auth_token');
+    if (token) {
+        return { 'Authorization': `Bearer ${token}` };
+    }
+    return {};
+}
+
+function isUserLoggedIn() {
+    return !!localStorage.getItem('flowmotion_auth_token');
+}
+
+// Check auth before protected actions
+function checkAuthBeforeAction(actionName = 'use this feature') {
+    if (!isUserLoggedIn()) {
+        if (typeof showLoginPrompt === 'function') {
+            showLoginPrompt(actionName);
+        } else {
+            showNotification('Please sign in to ' + actionName, 'info');
+        }
+        return false;
+    }
+    return true;
+}
 
 // Auto-detect local development
-const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const API_URL = IS_LOCAL 
+const API_URL = APP_IS_LOCAL
     ? 'http://localhost:8000' 
     : 'https://flowmotionbackend-production.up.railway.app';
 
@@ -788,6 +815,9 @@ function buildProjectJSON() {
 async function viewCopyCode() {
     if (isGenerating) return;
     
+    // Check auth first
+    if (!checkAuthBeforeAction('generate code')) return;
+    
     const tier = TIERS[currentTier];
     if (!tier.hasCodeFirstOption) {
         showNotification('View/Copy code is available in Pro+ plan', 'info');
@@ -821,7 +851,10 @@ async function viewCopyCode() {
         
         const response = await fetch(`${API_URL}/generate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
             body: JSON.stringify({ project })
         });
         
@@ -860,6 +893,9 @@ async function viewCopyCode() {
 async function customizeCode() {
     if (isGenerating) return;
     
+    // Check auth first
+    if (!checkAuthBeforeAction('generate code')) return;
+    
     const tier = TIERS[currentTier];
     if (!tier.hasCodeFirstOption) {
         showNotification('Code customization is available in Pro+ plan', 'info');
@@ -892,7 +928,10 @@ async function customizeCode() {
         
         const response = await fetch(`${API_URL}/generate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
             body: JSON.stringify({ project })
         });
         
@@ -1168,6 +1207,9 @@ async function renderVideo() {
 async function renderVideoFirstWorkflow() {
     if (isRendering) return;
     
+    // Check auth first
+    if (!checkAuthBeforeAction('render videos')) return;
+    
     if (!canGenerateVideo()) {
         showNotification(`Daily limit reached. Upgrade for more videos!`, 'error');
         showUpgradeModal();
@@ -1203,7 +1245,10 @@ async function renderVideoFirstWorkflow() {
         // Single API call that generates + renders
         const response = await fetch(`${API_URL}/render`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
             body: JSON.stringify({ project, quality: 'l' })
         });
         
@@ -1257,6 +1302,9 @@ async function renderVideoFirstWorkflow() {
 async function renderVideoWithCode(code) {
     if (isRendering) return;
     
+    // Check auth first
+    if (!checkAuthBeforeAction('render videos')) return;
+    
     if (!canGenerateVideo()) {
         showNotification(`Daily limit reached. Upgrade for more videos!`, 'error');
         showUpgradeModal();
@@ -1283,7 +1331,10 @@ async function renderVideoWithCode(code) {
         // Send pre-generated/customized code to render endpoint
         const response = await fetch(`${API_URL}/render`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
             body: JSON.stringify({ code, quality: 'l' })
         });
         
@@ -1669,6 +1720,12 @@ function closeAutofillModal() {
 async function executeAutofill() {
     if (isAutofilling) return;
     
+    // Check auth first
+    if (!checkAuthBeforeAction('use AI autofill')) {
+        closeAutofillModal();
+        return;
+    }
+    
     const topicInput = document.getElementById('autofill-topic');
     const topic = topicInput.value.trim();
     
@@ -1694,7 +1751,10 @@ async function executeAutofill() {
     try {
         const response = await fetch(`${API_URL}/autofill`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
             body: JSON.stringify({
                 topic: topic,
                 max_chars_per_field: tier.maxCharsPerField,
@@ -3089,7 +3149,7 @@ addScene();
 updateSceneCount();
 
 // Show local dev indicator
-if (IS_LOCAL) {
+if (APP_IS_LOCAL) {
     const devBadge = document.createElement('div');
     devBadge.className = 'dev-badge';
     devBadge.innerHTML = `
