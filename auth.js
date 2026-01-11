@@ -1,6 +1,6 @@
 /**
  * FlowMotion - Authentication Module
- * Shows full dashboard with Sign In button - prompts login on action
+ * Tier is controlled by backend (Supabase database) - no localStorage tier manipulation
  */
 
 // Auth state
@@ -58,6 +58,10 @@ async function initAuth() {
                 authToken = storedToken;
                 currentUser = JSON.parse(storedUser);
                 console.log('[Auth] Restored from localStorage:', currentUser.email);
+                
+                // Fetch fresh tier from backend
+                await refreshUserFromBackend();
+                
                 updateAuthUI();
                 isAuthInitialized = true;
                 return;
@@ -68,8 +72,9 @@ async function initAuth() {
         clearAuthState();
     }
     
-    // No session - show sign in button
+    // No session - show sign in button, set FREE tier
     console.log('[Auth] No session, showing sign in button');
+    setTierFromBackend('Free');
     updateAuthUI();
     
     // Listen for auth changes
@@ -80,6 +85,7 @@ async function initAuth() {
             await handleSignIn(session);
         } else if (event === 'SIGNED_OUT') {
             clearAuthState();
+            setTierFromBackend('Free');
             updateAuthUI();
         }
     });
@@ -221,7 +227,7 @@ async function handleSignIn(session) {
     // Close login prompt if open
     closeLoginPrompt();
     
-    // Sync with backend
+    // Sync with backend - this is the SOURCE OF TRUTH for tier
     try {
         const response = await fetch(`${AUTH_API_URL}/auth/sync`, {
             method: 'POST',
@@ -237,15 +243,12 @@ async function handleSignIn(session) {
             currentUser = { ...result.user, usage: result.usage };
             localStorage.setItem(USER_KEY, JSON.stringify(currentUser));
             
+            // Set tier from backend (SOURCE OF TRUTH)
             if (result.user.subscription_tier) {
-                let tierKey = result.user.subscription_tier.toUpperCase().replace(' ', '_');
-                if (tierKey === 'PRO+') tierKey = 'PRO_PLUS';
-                if (typeof TIERS !== 'undefined' && TIERS[tierKey]) {
-                    currentTier = tierKey;
-                    if (typeof saveTier === 'function') saveTier();
-                }
+                setTierFromBackend(result.user.subscription_tier);
             }
             
+            // Sync usage from backend
             if (result.usage && typeof saveUsage === 'function') {
                 todayUsage = {
                     videos: result.usage.videos || 0,
@@ -267,6 +270,71 @@ async function handleSignIn(session) {
     }
 }
 
+// ===== TIER MANAGEMENT (Backend-controlled) =====
+
+// Convert backend tier name to frontend key and apply
+function setTierFromBackend(tierName) {
+    if (typeof TIERS === 'undefined') return;
+    
+    let tierKey = tierName.toUpperCase().replace(' ', '_').replace('+', '_PLUS');
+    // Handle "Pro+" -> "PRO_PLUS"
+    if (tierKey === 'PRO+') tierKey = 'PRO_PLUS';
+    
+    if (TIERS[tierKey]) {
+        currentTier = tierKey;
+        console.log('[Auth] Tier set from backend:', tierKey);
+    } else {
+        currentTier = 'FREE';
+        console.log('[Auth] Unknown tier, defaulting to FREE');
+    }
+    
+    if (typeof updateTierUI === 'function') updateTierUI();
+    if (typeof updateSceneCount === 'function') updateSceneCount();
+}
+
+// Fetch fresh user data from backend (call on app load)
+async function refreshUserFromBackend() {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return null;
+    
+    try {
+        const response = await fetch(`${AUTH_API_URL}/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.ok) {
+            const userData = await response.json();
+            console.log('[Auth] Refreshed user data from backend:', userData);
+            
+            // Update tier from backend (SOURCE OF TRUTH)
+            if (userData.subscription_tier) {
+                setTierFromBackend(userData.subscription_tier);
+            }
+            
+            // Update usage
+            if (userData.usage && typeof saveUsage === 'function') {
+                todayUsage = {
+                    videos: userData.usage.videos || 0,
+                    autofills: userData.usage.autofills || 0,
+                    codeViews: 0,
+                    date: new Date().toDateString()
+                };
+                saveUsage();
+            }
+            
+            return userData;
+        } else if (response.status === 401) {
+            // Token expired
+            clearAuthState();
+            setTierFromBackend('Free');
+            updateAuthUI();
+        }
+    } catch (e) {
+        console.warn('[Auth] Failed to refresh user:', e);
+    }
+    return null;
+}
+
 async function logout() {
     console.log('[Auth] Logging out...');
     
@@ -274,13 +342,8 @@ async function logout() {
     await supabase.auth.signOut();
     
     clearAuthState();
+    setTierFromBackend('Free');
     updateAuthUI();
-    
-    if (typeof TIERS !== 'undefined') {
-        currentTier = 'FREE';
-        if (typeof saveTier === 'function') saveTier();
-        if (typeof updateTierUI === 'function') updateTierUI();
-    }
     
     if (typeof showNotification === 'function') {
         showNotification('Logged out', 'success');

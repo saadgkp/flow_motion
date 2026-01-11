@@ -42,7 +42,8 @@ const TIERS = {
         autofillsPerDay: 3,       // Autofill limit
         maxScenes: 6,
         maxCharsPerField: 150,
-        maxCodeViews: 2,          // Can view code 2 times after render
+        maxObjectsPerScene: 3,    // Object limit per scene
+        maxCodeViews: 0,          // No code access
         canEditCode: false,       // No editing
         canCopyCode: false,       // No copy
         canExportCode: false,     // No export
@@ -54,6 +55,7 @@ const TIERS = {
         autofillsPerDay: 10,      // Autofill limit
         maxScenes: 15,
         maxCharsPerField: 400,
+        maxObjectsPerScene: 5,    // Object limit per scene
         maxCodeViews: Infinity,   // Unlimited views
         canEditCode: false,       // No editing (video-first only)
         canCopyCode: true,        // Can copy
@@ -66,6 +68,7 @@ const TIERS = {
         autofillsPerDay: 30,      // Autofill limit
         maxScenes: 50,
         maxCharsPerField: 1000,
+        maxObjectsPerScene: 10,   // Object limit per scene
         maxCodeViews: Infinity,   // Unlimited views
         canEditCode: true,        // Can edit (if code-first path)
         canCopyCode: true,        // Can copy
@@ -130,10 +133,8 @@ function initializeUsage() {
         }
     }
     
-    const storedTier = localStorage.getItem('flowmotion_tier');
-    if (storedTier && TIERS[storedTier]) {
-        currentTier = storedTier;
-    }
+    // Tier is loaded from backend via auth.js - default to FREE until auth completes
+    currentTier = 'FREE';
     
     updateTierUI();
 }
@@ -143,7 +144,8 @@ function saveUsage() {
 }
 
 function saveTier() {
-    localStorage.setItem('flowmotion_tier', currentTier);
+    // Tier is now controlled by backend - do nothing
+    // Kept for backward compatibility with any calls
 }
 
 // ===== TIER UI =====
@@ -153,11 +155,13 @@ function updateTierUI() {
     const tier = TIERS[currentTier];
     const remaining = tier.videosPerDay - todayUsage.videos;
     
-    // Update tier badge in header
+    // Update tier badge in header (display only, not clickable)
     const tierBadge = document.getElementById('tier-badge');
     if (tierBadge) {
         tierBadge.textContent = tier.name;
         tierBadge.className = `tier-badge tier-${currentTier.toLowerCase().replace('_', '-')}`;
+        tierBadge.style.cursor = 'default';  // Not clickable
+        tierBadge.onclick = null;  // Remove click handler
     }
     
     // Update usage display
@@ -484,7 +488,7 @@ function createSceneCard(id, index, data = {}) {
                     <line x1="12" y1="5" x2="12" y2="19"/>
                     <line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                Add Object
+                Add Object (${(data.objects || []).length}/${tier.maxObjectsPerScene})
             </button>
         </div>
     `;
@@ -495,11 +499,14 @@ function createSceneCard(id, index, data = {}) {
 // ===== CREATE OBJECT HTML =====
 function createObjectHTML(sceneId, obj = {}, index = 0) {
     const objId = obj.id || Date.now() + index;
+    const tier = TIERS[currentTier];
+    const maxChars = tier.maxCharsPerField;
+    
     return `
         <div class="object-item" data-object-id="${objId}">
             <div class="object-header">
                 <span class="object-num">${index + 1}</span>
-                <input type="text" class="object-name" placeholder="Name" value="${obj.name || ''}" data-field="name">
+                <input type="text" class="object-name" placeholder="Name" value="${obj.name || ''}" data-field="name" maxlength="${maxChars}">
                 <button class="btn-remove-obj" onclick="removeObject(${sceneId}, ${objId})">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -507,8 +514,8 @@ function createObjectHTML(sceneId, obj = {}, index = 0) {
                     </svg>
                 </button>
             </div>
-            <textarea class="obj-field" placeholder="Description" data-field="description" rows="1">${obj.description || ''}</textarea>
-            <textarea class="obj-field" placeholder="Animation" data-field="animation" rows="1">${obj.animation || ''}</textarea>
+            <textarea class="obj-field" placeholder="Description" data-field="description" rows="1" maxlength="${maxChars}">${obj.description || ''}</textarea>
+            <textarea class="obj-field" placeholder="Animation" data-field="animation" rows="1" maxlength="${maxChars}">${obj.animation || ''}</textarea>
         </div>
     `;
 }
@@ -530,6 +537,16 @@ function addObject(sceneId) {
     
     if (!scene.objects) scene.objects = [];
     
+    // Check object limit for current tier
+    const tier = TIERS[currentTier];
+    const maxObjects = tier.maxObjectsPerScene;
+    
+    if (scene.objects.length >= maxObjects) {
+        showNotification(`Object limit reached (${maxObjects} per scene). Upgrade for more!`, 'info');
+        showUpgradeModal();
+        return;
+    }
+    
     objectCounter++;
     const obj = {
         id: objectCounter,
@@ -542,6 +559,9 @@ function addObject(sceneId) {
     
     const objectsList = document.querySelector(`.object-details-panel[data-scene-id="${sceneId}"] .objects-list`);
     objectsList.insertAdjacentHTML('beforeend', createObjectHTML(sceneId, obj, scene.objects.length - 1));
+    
+    // Update the "Add Object" button to show remaining count
+    updateAddObjectButton(sceneId);
 }
 
 // ===== REMOVE OBJECT =====
@@ -562,7 +582,47 @@ function removeObject(sceneId, objectId) {
         panel.querySelectorAll('.object-item').forEach((item, i) => {
             item.querySelector('.object-num').textContent = i + 1;
         });
+        
+        // Update the "Add Object" button to show remaining count
+        updateAddObjectButton(sceneId);
     }, 210);
+}
+
+// ===== UPDATE ADD OBJECT BUTTON =====
+function updateAddObjectButton(sceneId) {
+    const scene = scenes.find(s => s.id === sceneId);
+    if (!scene) return;
+    
+    const tier = TIERS[currentTier];
+    const maxObjects = tier.maxObjectsPerScene;
+    const currentCount = (scene.objects || []).length;
+    const remaining = maxObjects - currentCount;
+    
+    const panel = document.querySelector(`.object-details-panel[data-scene-id="${sceneId}"]`);
+    if (!panel) return;
+    
+    const addBtn = panel.querySelector('.btn-add-object');
+    if (addBtn) {
+        if (remaining <= 0) {
+            addBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+                Limit Reached (${maxObjects})
+            `;
+            addBtn.classList.add('limit-reached');
+        } else {
+            addBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                Add Object (${currentCount}/${maxObjects})
+            `;
+            addBtn.classList.remove('limit-reached');
+        }
+    }
 }
 
 // ===== CREATE TRANSITION BLOCK =====
@@ -571,6 +631,8 @@ function createTransitionBlock(fromId, toId, data = '') {
     block.className = 'transition-block';
     block.dataset.from = fromId;
     block.dataset.to = toId;
+    
+    const maxChars = 100;  // Fixed limit for transitions
     
     block.innerHTML = `
         <div class="transition-line">
@@ -587,7 +649,9 @@ function createTransitionBlock(fromId, toId, data = '') {
                 placeholder="Transition"
                 data-field="transition"
                 rows="2"
+                maxlength="${maxChars}"
             >${data}</textarea>
+            <span class="char-counter transition-counter">${(data || '').length}/${maxChars}</span>
         </div>
     `;
     
@@ -743,6 +807,23 @@ scenesContainer.addEventListener('input', (e) => {
         const fromId = parseInt(block.dataset.from);
         const toId = parseInt(block.dataset.to);
         const transition = transitions.find(t => t.from === fromId && t.to === toId);
+        
+        // Enforce 100 character limit for transitions
+        const maxChars = 100;
+        if (e.target.value.length > maxChars) {
+            e.target.value = e.target.value.substring(0, maxChars);
+            showNotification(`Transition limit: ${maxChars} characters`, 'info');
+        }
+        
+        // Update character counter
+        const counter = block.querySelector('.transition-counter');
+        if (counter) {
+            const remaining = maxChars - e.target.value.length;
+            counter.textContent = `${e.target.value.length}/${maxChars}`;
+            counter.classList.toggle('limit-warning', remaining < 20);
+            counter.classList.toggle('limit-reached', remaining <= 0);
+        }
+        
         if (transition) transition.description = e.target.value;
         return;
     }
@@ -1224,48 +1305,77 @@ async function renderVideoFirstWorkflow() {
     
     isRendering = true;
     videoBtn.disabled = true;
-    videoBtn.innerHTML = `
-        <svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10" stroke-dasharray="60" stroke-dashoffset="20"/>
-        </svg>
-        <span>Rendering...</span>
-    `;
     
     // Also disable customize button if visible
     if (renderBtn) {
         renderBtn.disabled = true;
     }
     
-    previewBadge.textContent = 'Rendering';
+    previewBadge.textContent = 'Working';
     previewBadge.classList.remove('rendered');
     
     try {
         const project = buildProjectJSON();
         
-        // Single API call that generates + renders
-        const response = await fetch(`${API_URL}/render`, {
+        // ===== STEP 1: Generate Code =====
+        updateRenderStatus('Generating code...', 'code');
+        
+        const codeResponse = await fetch(`${API_URL}/generate`, {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json',
                 ...getAuthHeaders()
             },
-            body: JSON.stringify({ project, quality: 'l' })
+            body: JSON.stringify({ project })
         });
         
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.detail || `Server error: ${response.status}`);
+        if (!codeResponse.ok) {
+            const error = await codeResponse.json().catch(() => ({}));
+            throw new Error(error.detail || `Code generation failed: ${codeResponse.status}`);
         }
         
-        const data = await response.json();
+        const codeData = await codeResponse.json();
         
-        if (data.success && data.video_url) {
-            // Cache code if returned (for viewing after)
-            if (data.code) {
-                generatedCode = data.code;
-                codeWasCustomized = false;  // Video-first, so no customization
-                sessionCodeViews = 0;        // Reset view count for new video
+        if (!codeData.success || !codeData.code) {
+            throw new Error(codeData.message || 'Code generation failed');
+        }
+        
+        // Cache the generated code
+        generatedCode = codeData.code;
+        
+        // ===== STEP 2: Render Video =====
+        updateRenderStatus('Rendering video...', 'render');
+        
+        const renderResponse = await fetch(`${API_URL}/render`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                ...getAuthHeaders()
+            },
+            body: JSON.stringify({ code: generatedCode, quality: 'l' })
+        });
+        
+        if (!renderResponse.ok) {
+            const error = await renderResponse.json().catch(() => ({}));
+            throw new Error(error.detail || `Render failed: ${renderResponse.status}`);
+        }
+        
+        const renderData = await renderResponse.json();
+        
+        // Check if code was auto-corrected (fallback mechanism)
+        if (renderData.corrected) {
+            // Update cached code with corrected version
+            generatedCode = renderData.code;
+            showNotification(`Video rendered! (Auto-corrected after ${renderData.attempts - 1} error${renderData.attempts > 2 ? 's' : ''})`, 'success');
+        }
+        
+        if (renderData.success && renderData.video_url) {
+            // Update cached code if returned
+            if (renderData.code) {
+                generatedCode = renderData.code;
             }
+            codeWasCustomized = false;  // Video-first, so no customization
+            sessionCodeViews = 0;        // Reset view count for new video
             
             // Update usage
             todayUsage.videos++;
@@ -1273,15 +1383,17 @@ async function renderVideoFirstWorkflow() {
             updateTierUI();
             
             // Show video
-            const videoUrl = `${API_URL}${data.video_url}`;
+            const videoUrl = `${API_URL}${renderData.video_url}`;
             showVideoInPreview(videoUrl);
             
             // Add "View Code" button to preview
             addViewCodeButton();
             
-            showNotification('Video rendered successfully!', 'success');
+            if (!renderData.corrected) {
+                showNotification('Video rendered successfully!', 'success');
+            }
         } else {
-            throw new Error(data.message || 'Render failed');
+            throw new Error(renderData.message || 'Render failed');
         }
         
     } catch (error) {
@@ -1294,8 +1406,33 @@ async function renderVideoFirstWorkflow() {
         if (renderBtn) {
             renderBtn.disabled = false;
         }
+        resetRenderStatus();
         updateTierUI();
     }
+}
+
+// ===== RENDER STATUS HELPERS =====
+function updateRenderStatus(message, phase) {
+    const icon = phase === 'code' ? 
+        '<svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' :
+        '<svg class="spinner" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+    
+    videoBtn.innerHTML = `
+        ${icon}
+        <span class="render-status-text">${message}</span>
+    `;
+    
+    previewBadge.textContent = phase === 'code' ? 'Generating' : 'Rendering';
+}
+
+function resetRenderStatus() {
+    videoBtn.innerHTML = `
+        <span class="btn-shine"></span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span>Render Video</span>
+    `;
 }
 
 // ===== RENDER WITH EXISTING CODE (PRO+ Code-First Path) =====
@@ -1403,11 +1540,15 @@ function showVideoInPreview(videoUrl) {
 function addViewCodeButton() {
     if (!generatedCode) return;
     
+    const tier = TIERS[currentTier];
+    
+    // Don't show button for FREE tier (no code access)
+    if (tier.maxCodeViews === 0) return;
+    
     const previewHeader = document.querySelector('.preview-header');
     const existingBtn = previewHeader.querySelector('.btn-view-code');
     if (existingBtn) existingBtn.remove();
     
-    const tier = TIERS[currentTier];
     const remainingViews = getRemainingCodeViews();
     
     const viewCodeBtn = document.createElement('button');
@@ -1463,7 +1604,7 @@ function showUpgradeModal() {
                             <li>3 AI autofills/day</li>
                             <li>6 scenes max</li>
                             <li>150 chars/field</li>
-                            <li>View code 2x after render</li>
+                            <li style="text-decoration: line-through; opacity: 0.5;">No code access</li>
                         </ul>
                         ${currentTier === 'FREE' ? '<button class="btn-current" disabled>Current Plan</button>' : ''}
                     </div>
@@ -1516,60 +1657,20 @@ function closeUpgradeModal() {
 }
 
 function selectTier(tier) {
-    // In production, this would redirect to payment
-    // For demo, just set the tier
-    currentTier = tier;
-    saveTier();
-    resetCodeState();
-    updateTierUI();
+    // Tier is controlled by backend only - no frontend tier changes allowed
+    // In production, this will redirect to payment provider (LemonSqueezy)
+    showNotification('Payment integration coming soon! Contact support for upgrades.', 'info');
     closeUpgradeModal();
-    showNotification(`Upgraded to ${TIERS[tier].name}!`, 'success');
+    
+    // TODO: Redirect to payment URL
+    // window.location.href = `https://your-lemonsqueezy-store.lemonsqueezy.com/checkout/buy/${tier}`;
 }
 
-// ===== TIER SELECTOR (For Demo) =====
+// ===== TIER SELECTOR (Removed - Tier controlled by backend) =====
+// To upgrade users: Go to Supabase Dashboard → Table Editor → users → change subscription_tier
 function showTierSelector() {
-    const existingSelector = document.getElementById('tier-selector-modal');
-    if (existingSelector) existingSelector.remove();
-    
-    const modal = document.createElement('div');
-    modal.id = 'tier-selector-modal';
-    modal.className = 'modal-overlay';
-    modal.innerHTML = `
-        <div class="modal-content tier-selector-modal">
-            <div class="modal-header">
-                <h3>Select Tier (Demo)</h3>
-                <button class="modal-close" onclick="closeTierSelector()">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <p style="margin-bottom: 1rem; color: var(--text-secondary);">For testing different workflows:</p>
-                <div class="tier-selector-buttons">
-                    <button class="tier-select-btn ${currentTier === 'FREE' ? 'active' : ''}" onclick="setDemoTier('FREE')">
-                        <strong>Free</strong>
-                        <span>6 scenes • 150 chars • 3 videos • 3 autofills</span>
-                    </button>
-                    <button class="tier-select-btn ${currentTier === 'PRO' ? 'active' : ''}" onclick="setDemoTier('PRO')">
-                        <strong>Pro</strong>
-                        <span>15 scenes • 400 chars • 10 videos • 10 autofills</span>
-                    </button>
-                    <button class="tier-select-btn ${currentTier === 'PRO_PLUS' ? 'active' : ''}" onclick="setDemoTier('PRO_PLUS')">
-                        <strong>Pro+</strong>
-                        <span>50 scenes • 1000 chars • 30 videos • 30 autofills</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeTierSelector();
-    });
+    // Disabled - tier is now controlled via Supabase dashboard
+    showNotification('Contact support to upgrade your plan', 'info');
 }
 
 function closeTierSelector() {
@@ -1578,14 +1679,8 @@ function closeTierSelector() {
 }
 
 function setDemoTier(tier) {
-    currentTier = tier;
-    saveTier();
-    resetCodeState();
-    updateTierUI();
-    updateSceneCount();  // Update scene count display for new tier limits
-    renderTimeline();    // Re-render to update char limits
-    closeTierSelector();
-    showNotification(`Switched to ${TIERS[tier].name} tier`, 'success');
+    // Disabled - tier is now controlled via Supabase dashboard
+    showNotification('Tier changes are managed by admin', 'info');
 }
 
 // ===== NOTIFICATION =====
@@ -2270,12 +2365,19 @@ style.textContent = `
         transition: all 0.2s ease;
     }
     
-    .prompt-input-wrap {
+    .prompt-input-wrap,
+    .transition-input-wrap {
         position: relative;
     }
     
-    .prompt-input:focus + .char-counter {
+    .prompt-input:focus + .char-counter,
+    .transition-input:focus + .transition-counter {
         opacity: 1;
+    }
+    
+    .transition-counter {
+        bottom: 6px;
+        right: 10px;
     }
     
     .char-counter.limit-warning {
@@ -3054,6 +3156,19 @@ style.textContent = `
         color: white;
     }
     
+    /* Add Object Button Limit */
+    .btn-add-object.limit-reached {
+        background: var(--surface-alt);
+        color: var(--text-muted);
+        cursor: not-allowed;
+        opacity: 0.7;
+    }
+    
+    .btn-add-object.limit-reached:hover {
+        background: var(--surface-alt);
+        border-color: var(--border);
+    }
+    
     /* Toolbar Buttons */
     .btn-autofill,
     .btn-save,
@@ -3117,8 +3232,618 @@ style.textContent = `
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
+    
+    /* Footer Links */
+    .footer-links {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .footer-link {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-size: 0.75rem;
+        cursor: pointer;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+    }
+    
+    .footer-link:hover {
+        color: var(--primary);
+        background: rgba(16, 185, 129, 0.1);
+    }
+    
+    .footer-divider {
+        color: var(--text-muted);
+        opacity: 0.5;
+        font-size: 0.5rem;
+    }
+    
+    /* Legal Modal */
+    .legal-modal {
+        max-width: 700px;
+        max-height: 80vh;
+    }
+    
+    .legal-modal .modal-body {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+    
+    .legal-content h2 {
+        font-size: 1.25rem;
+        color: var(--text);
+        margin: 1.5rem 0 0.75rem 0;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid var(--border);
+    }
+    
+    .legal-content h2:first-child {
+        margin-top: 0;
+    }
+    
+    .legal-content p {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.6;
+        margin-bottom: 1rem;
+    }
+    
+    .legal-content ul {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        line-height: 1.6;
+        margin-bottom: 1rem;
+        padding-left: 1.5rem;
+    }
+    
+    .legal-content li {
+        margin-bottom: 0.5rem;
+    }
+    
+    .legal-content .highlight {
+        background: rgba(16, 185, 129, 0.1);
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 3px solid var(--primary);
+    }
+    
+    .legal-content .last-updated {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        font-style: italic;
+    }
+    
+    /* Pricing Modal */
+    .pricing-modal {
+        max-width: 950px;
+    }
+    
+    .pricing-header {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    
+    .pricing-header h2 {
+        font-size: 1.75rem;
+        color: var(--text);
+        margin-bottom: 0.5rem;
+    }
+    
+    .pricing-header p {
+        color: var(--text-muted);
+    }
+    
+    .pricing-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.5rem;
+    }
+    
+    .pricing-card {
+        background: var(--surface-alt);
+        border: 2px solid var(--border);
+        border-radius: 16px;
+        padding: 1.5rem;
+        position: relative;
+        transition: all 0.2s ease;
+    }
+    
+    .pricing-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    }
+    
+    .pricing-card.featured {
+        border-color: var(--primary);
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.05), rgba(52, 211, 153, 0.02));
+    }
+    
+    .pricing-card.featured::before {
+        content: 'Most Popular';
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--primary);
+        color: white;
+        padding: 0.25rem 1rem;
+        border-radius: 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .pricing-card-header {
+        text-align: center;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 1rem;
+    }
+    
+    .pricing-card-name {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--text);
+    }
+    
+    .pricing-card-price {
+        font-size: 2.5rem;
+        font-weight: 700;
+        color: var(--primary-dark);
+        margin: 0.5rem 0;
+    }
+    
+    .pricing-card-price span {
+        font-size: 1rem;
+        font-weight: 400;
+        color: var(--text-muted);
+    }
+    
+    .pricing-card-desc {
+        font-size: 0.85rem;
+        color: var(--text-muted);
+    }
+    
+    .pricing-features {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 1.5rem 0;
+    }
+    
+    .pricing-features li {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.5rem 0;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+    }
+    
+    .pricing-features li svg {
+        flex-shrink: 0;
+        color: var(--primary);
+        margin-top: 2px;
+    }
+    
+    .pricing-features li.disabled {
+        color: var(--text-muted);
+        text-decoration: line-through;
+    }
+    
+    .pricing-features li.disabled svg {
+        color: var(--text-muted);
+    }
+    
+    .pricing-card-btn {
+        width: 100%;
+        padding: 0.75rem;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+    
+    .pricing-card-btn.primary {
+        background: var(--primary);
+        color: white;
+        border: none;
+    }
+    
+    .pricing-card-btn.primary:hover {
+        background: var(--primary-dark);
+    }
+    
+    .pricing-card-btn.secondary {
+        background: transparent;
+        color: var(--text);
+        border: 1px solid var(--border);
+    }
+    
+    .pricing-card-btn.secondary:hover {
+        border-color: var(--primary);
+        color: var(--primary);
+    }
+    
+    .pricing-note {
+        text-align: center;
+        margin-top: 1.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid var(--border);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+    
+    @media (max-width: 768px) {
+        .pricing-cards {
+            grid-template-columns: 1fr;
+        }
+        
+        .footer-links {
+            display: none;
+        }
+    }
 `;
 document.head.appendChild(style);
+
+// ===== PRICING MODAL =====
+function showPricingModal() {
+    const existingModal = document.getElementById('pricing-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'pricing-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content pricing-modal">
+            <div class="modal-header">
+                <h3>Choose Your Plan</h3>
+                <button class="modal-close" onclick="closePricingModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="pricing-header">
+                    <h2>Simple, Transparent Pricing</h2>
+                    <p>Start free, upgrade when you need more power</p>
+                </div>
+                
+                <div class="pricing-cards">
+                    <!-- Free -->
+                    <div class="pricing-card">
+                        <div class="pricing-card-header">
+                            <div class="pricing-card-name">Free</div>
+                            <div class="pricing-card-price">$0<span>/month</span></div>
+                            <div class="pricing-card-desc">Perfect for getting started</div>
+                        </div>
+                        <ul class="pricing-features">
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>3</strong> videos per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>3</strong> AI autofills per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Up to <strong>6</strong> scenes</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>150 characters per field</span>
+                            </li>
+                            <li class="disabled">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                <span>View/Copy code</span>
+                            </li>
+                            <li class="disabled">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                <span>Export code</span>
+                            </li>
+                        </ul>
+                        <button class="pricing-card-btn secondary" onclick="closePricingModal()">Current Plan</button>
+                    </div>
+                    
+                    <!-- Pro -->
+                    <div class="pricing-card featured">
+                        <div class="pricing-card-header">
+                            <div class="pricing-card-name">Pro</div>
+                            <div class="pricing-card-price">$10<span>/month</span></div>
+                            <div class="pricing-card-desc">For regular creators</div>
+                        </div>
+                        <ul class="pricing-features">
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>10</strong> videos per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>10</strong> AI autofills per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Up to <strong>15</strong> scenes</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>400 characters per field</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Unlimited code views</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Copy & Export code</span>
+                            </li>
+                        </ul>
+                        <button class="pricing-card-btn primary" onclick="selectTier('PRO'); closePricingModal();">Upgrade to Pro</button>
+                    </div>
+                    
+                    <!-- Pro+ -->
+                    <div class="pricing-card">
+                        <div class="pricing-card-header">
+                            <div class="pricing-card-name">Pro+</div>
+                            <div class="pricing-card-price">$25<span>/month</span></div>
+                            <div class="pricing-card-desc">For power users</div>
+                        </div>
+                        <ul class="pricing-features">
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>30</strong> videos per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span><strong>30</strong> AI autofills per day</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Up to <strong>50</strong> scenes</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>1000 characters per field</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Customize code before render</span>
+                            </li>
+                            <li>
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Priority rendering</span>
+                            </li>
+                        </ul>
+                        <button class="pricing-card-btn primary" onclick="selectTier('PRO_PLUS'); closePricingModal();">Upgrade to Pro+</button>
+                    </div>
+                </div>
+                
+                <div class="pricing-note">
+                    🔒 Secure payments via Stripe • Cancel anytime • All sales final (no refunds)
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closePricingModal();
+    });
+}
+
+function closePricingModal() {
+    const modal = document.getElementById('pricing-modal');
+    if (modal) modal.remove();
+}
+
+// ===== TERMS OF SERVICE MODAL =====
+function showTermsModal() {
+    const existingModal = document.getElementById('terms-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'terms-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content legal-modal">
+            <div class="modal-header">
+                <h3>Terms of Service</h3>
+                <button class="modal-close" onclick="closeTermsModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="legal-content">
+                    <p class="last-updated">Last updated: January 2026</p>
+                    
+                    <h2>1. Acceptance of Terms</h2>
+                    <p>By accessing or using FlowMotion ("the Service"), you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the Service.</p>
+                    
+                    <h2>2. Description of Service</h2>
+                    <p>FlowMotion is a web-based platform that allows users to create mathematical animations using a visual interface. The Service generates Manim code and renders videos based on user input.</p>
+                    
+                    <h2>3. User Accounts</h2>
+                    <ul>
+                        <li>You must provide accurate information when creating an account</li>
+                        <li>You are responsible for maintaining the security of your account</li>
+                        <li>You must be at least 13 years old to use this Service</li>
+                        <li>One person or entity may not maintain more than one free account</li>
+                    </ul>
+                    
+                    <h2>4. Acceptable Use</h2>
+                    <p>You agree NOT to use the Service to:</p>
+                    <ul>
+                        <li>Generate illegal, harmful, or offensive content</li>
+                        <li>Violate any applicable laws or regulations</li>
+                        <li>Infringe on intellectual property rights of others</li>
+                        <li>Attempt to bypass usage limits or security measures</li>
+                        <li>Resell or redistribute the Service without permission</li>
+                    </ul>
+                    
+                    <h2>5. Content Ownership & AI Training</h2>
+                    <div class="highlight">
+                        <p><strong>Your Content:</strong> You retain ownership of all content you create using FlowMotion. Videos and code generated from your input belong to you.</p>
+                    </div>
+                    <p>By using the Service, you grant FlowMotion a limited license to process your input for the purpose of generating animations.</p>
+                    <div class="highlight" style="border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.1); margin-top: 1rem;">
+                        <p><strong>⚠️ AI Training:</strong> You agree that your scene configurations and generated Manim code may be used to train and improve our AI models. This data helps us provide better animation quality for all users.</p>
+                    </div>
+                    
+                    <h2>6. Payment & Subscriptions</h2>
+                    <ul>
+                        <li>Paid plans are billed monthly or annually in advance</li>
+                        <li>Prices are subject to change with 30 days notice</li>
+                        <li><strong>All purchases are final and non-refundable</strong></li>
+                        <li>You can cancel your subscription at any time (no future charges)</li>
+                    </ul>
+                    
+                    <h2>7. Service Availability</h2>
+                    <p>We strive for 99.9% uptime but do not guarantee uninterrupted service. We reserve the right to modify or discontinue features with reasonable notice.</p>
+                    
+                    <h2>8. Limitation of Liability</h2>
+                    <p>FlowMotion is provided "as is" without warranties. We are not liable for any indirect, incidental, or consequential damages arising from your use of the Service.</p>
+                    
+                    <h2>9. Changes to Terms</h2>
+                    <p>We may update these terms from time to time. Continued use of the Service after changes constitutes acceptance of the new terms.</p>
+                    
+                    <h2>10. Contact</h2>
+                    <p>For questions about these Terms, contact us at: <strong>ummeyahyasaad@gmail.com</strong></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="closeTermsModal()">I Understand</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeTermsModal();
+    });
+}
+
+function closeTermsModal() {
+    const modal = document.getElementById('terms-modal');
+    if (modal) modal.remove();
+}
+
+// ===== PRIVACY POLICY MODAL =====
+function showPrivacyModal() {
+    const existingModal = document.getElementById('privacy-modal');
+    if (existingModal) existingModal.remove();
+    
+    const modal = document.createElement('div');
+    modal.id = 'privacy-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <div class="modal-content legal-modal">
+            <div class="modal-header">
+                <h3>Privacy Policy</h3>
+                <button class="modal-close" onclick="closePrivacyModal()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="legal-content">
+                    <p class="last-updated">Last updated: January 2026</p>
+                    
+                    <h2>1. Information We Collect</h2>
+                    <p><strong>Account Information:</strong></p>
+                    <ul>
+                        <li>Name and email address (from Google Sign-In)</li>
+                        <li>Profile picture (optional, from Google)</li>
+                        <li>Subscription status and payment history</li>
+                    </ul>
+                    
+                    <p><strong>Usage Information:</strong></p>
+                    <ul>
+                        <li>Scene configurations you create</li>
+                        <li>Videos rendered and features used</li>
+                        <li>Technical logs (IP address, browser type)</li>
+                    </ul>
+                    
+                    <h2>2. How We Use Your Information</h2>
+                    <ul>
+                        <li>To provide and improve the Service</li>
+                        <li>To process payments and manage subscriptions</li>
+                        <li>To send important service updates</li>
+                        <li>To prevent fraud and abuse</li>
+                    </ul>
+                    
+                    <div class="highlight">
+                        <p><strong>🔒 We do NOT:</strong> Sell your personal data or share it with advertisers.</p>
+                    </div>
+                    
+                    <div class="highlight" style="border-left-color: #f59e0b; background: rgba(245, 158, 11, 0.1); margin-top: 1rem;">
+                        <p><strong>⚠️ AI Training:</strong> By using FlowMotion, you agree that your scene configurations and generated code may be used to improve and train our AI models. This helps us provide better animations for everyone.</p>
+                    </div>
+                    
+                    <h2>3. Data Storage & Security</h2>
+                    <ul>
+                        <li>Data is stored securely on Supabase (PostgreSQL)</li>
+                        <li>All connections are encrypted (HTTPS/TLS)</li>
+                        <li>We use industry-standard security practices</li>
+                        <li>Rendered videos are temporarily stored and auto-deleted</li>
+                    </ul>
+                    
+                    <h2>4. Third-Party Services</h2>
+                    <p>We use the following third-party services:</p>
+                    <ul>
+                        <li><strong>Google OAuth:</strong> For secure sign-in</li>
+                        <li><strong>Supabase:</strong> Database and authentication</li>
+                        <li><strong>Railway:</strong> Backend hosting</li>
+                        <li><strong>Stripe:</strong> Payment processing (if applicable)</li>
+                    </ul>
+                    
+                    <h2>5. Your Rights</h2>
+                    <p>You have the right to:</p>
+                    <ul>
+                        <li><strong>Access:</strong> Request a copy of your data</li>
+                        <li><strong>Delete:</strong> Request deletion of your account and data</li>
+                        <li><strong>Export:</strong> Download your saved scenes</li>
+                        <li><strong>Opt-out:</strong> Unsubscribe from marketing emails</li>
+                    </ul>
+                    
+                    <h2>6. Cookies</h2>
+                    <p>We use essential cookies for authentication. We do not use tracking or advertising cookies.</p>
+                    
+                    <h2>7. Children's Privacy</h2>
+                    <p>FlowMotion is not intended for children under 13. We do not knowingly collect data from children.</p>
+                    
+                    <h2>8. Changes to This Policy</h2>
+                    <p>We may update this policy periodically. We will notify you of significant changes via email or in-app notification.</p>
+                    
+                    <h2>9. Contact Us</h2>
+                    <p>For privacy concerns or data requests: <strong>ummeyahyasaad@gmail.com</strong></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="closePrivacyModal()">Got It</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closePrivacyModal();
+    });
+}
+
+function closePrivacyModal() {
+    const modal = document.getElementById('privacy-modal');
+    if (modal) modal.remove();
+}
 
 // ===== TOOLTIP POSITIONING =====
 document.addEventListener('mouseover', (e) => {
